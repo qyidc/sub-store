@@ -1,0 +1,4 @@
+name = "clash-sub-converter"
+compatibility_date = "2025-06-04"
+main = "src/index.js"
+workers_dev = true
