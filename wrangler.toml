@@ -1,15 +1,12 @@
-name = "sub-store"  # 使用CI期望的名称
+name = "sub-store"
 compatibility_date = "2025-06-04"
 main = "src/index.js"
 workers_dev = true
+
+# KV命名空间用于存储HTML
+kv_namespaces = [
+  { binding = "ASSETS", id = "xxxxxxxxxxxxxxxxxxxxxxxx" } # 替换为实际ID
+]
 # wrangler.toml (wrangler v3.88.0^)
 [observability.logs]
 enabled = true
-# 添加KV命名空间用于存储HTML
-kv_namespaces = [
-  { binding = "ASSETS", id = "b46100b9a05a4f43a5396959a122d648" } # 替换为实际ID
-]
-
-[site]
-bucket = "./public"
-entry-point = "src"
