@@ -5,3 +5,11 @@ workers_dev = true
 # wrangler.toml (wrangler v3.88.0^)
 [observability.logs]
 enabled = true
+# 添加KV命名空间用于存储HTML
+kv_namespaces = [
+  { binding = "ASSETS", id = "b46100b9a05a4f43a5396959a122d648" } # 替换为实际ID
+]
+
+[site]
+bucket = "./public"
+entry-point = "src"
