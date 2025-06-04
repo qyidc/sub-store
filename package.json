@@ -1,5 +1,5 @@
 {
-  "name": "clash-sub-converter",
+  "name": "sub-store",
   "version": "1.0.0",
   "main": "src/index.js",
   "scripts": {
@@ -7,10 +7,6 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
-    "base64-js": "^1.5.1",
-    "text-encoding": "^0.7.0"
-  },
-  "devDependencies": {
     "wrangler": "^4.19.1"
   }
 }
