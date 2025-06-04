@@ -1,4 +1,4 @@
-name = "clash-sub-converter"
+name = "sub-store"  # 使用CI期望的名称
 compatibility_date = "2025-06-04"
 main = "src/index.js"
 workers_dev = true
