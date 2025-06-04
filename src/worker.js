@@ -431,53 +431,7 @@ const HTML = `<!DOCTYPE html>
             <p>© 2023 Clash订阅转换工具 | 基于Cloudflare Workers构建</p>
             <p>本工具仅用于技术交流，请遵守当地法律法规使用</p>
         </footer>
-    </div>
-    <script>
-        // 前端JavaScript逻辑（已更新实际请求处理）
-        document.addEventListener('DOMContentLoaded', function() {
-            // ... 之前的JavaScript代码 ...
-            
-            // 更新转换按钮点击事件
-            convertBtn.addEventListener('click', async function() {
-                const url = subscriptionUrl.value.trim();
-                
-                if (!url) {
-                    showStatus('请输入有效的订阅链接', 'error');
-                    return;
-                }
-                
-                showStatus('正在处理您的订阅链接...', 'loading');
-                
-                try {
-                    // 发送转换请求到Worker
-                    const response = await fetch('/convert', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ url })
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error(`转换失败: ${response.status}`);
-                    }
-                    
-                    const result = await response.json();
-                    
-                    // 显示结果
-                    resultContent.textContent = result.config;
-                    resultContainer.style.display = 'block';
-                    downloadBtn.style.display = 'flex';
-                    
-                    showStatus('转换成功！', 'success');
-                } catch (error) {
-                    showStatus('转换失败: ' + error.message, 'error');
-                }
-            });
-            
-            // ... 其他事件监听器保持不变 ...
-        });
-    </script>
+    </div>   
 </body>
 </html>`;
 // 订阅转换处理
