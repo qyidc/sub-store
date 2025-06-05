@@ -1,6 +1,6 @@
 name = "clash-sub-converter" # 你的Worker名称
 main = "src/index.js"       # Worker脚本入口文件 (例如 worker.js 或 src/index.js)
-compatibility_date = "2023-12-01" # 使用一个较新的兼容性日期
+compatibility_date = "2025-06-05" # 使用一个较新的兼容性日期
 
 # R2 存储桶绑定 - 用于存放生成的订阅文件
 [[r2_buckets]]
