@@ -1,12 +1,15 @@
-name = "sub-store"
-compatibility_date = "2025-06-04"
-main = "src/index.js"
-workers_dev = true
+name = "clash-sub-converter" # 你的Worker名称
+main = "src/index.js"       # Worker脚本入口文件 (例如 worker.js 或 src/index.js)
+compatibility_date = "2023-12-01" # 使用一个较新的兼容性日期
 
-# KV命名空间用于存储HTML
-kv_namespaces = [
-  { binding = "ASSETS", id = "b46100b9a05a4f43a5396959a122d648" } # 替换为实际ID
-]
-# wrangler.toml (wrangler v3.88.0^)
-[observability.logs]
-enabled = true
+# R2 存储桶绑定 - 用于存放生成的订阅文件
+[[r2_buckets]]
+binding = "R2_SUBS_BUCKET"               # 在Worker代码中通过 env.R2_SUBS_BUCKET 访问
+bucket_name = "my-clash-subs"          # 替换为你的实际R2桶名 (用于订阅)
+# preview_bucket_name = "your-clash-subs-preview" # 可选，用于 wrangler dev
+
+# R2 存储桶绑定 - (可选) 用于存放前端静态文件，如果Worker也负责提供静态文件
+[[r2_buckets]]
+binding = "R2_STATIC_ASSETS"
+bucket_name = "clash-converter-static"
+# preview_bucket_name = "clash-converter-static-preview"
