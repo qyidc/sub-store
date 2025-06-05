@@ -1,8 +1,3 @@
-//<!-- 
-//========================================================================
-//                            Cloudflare Worker Script (worker.js / src/index.js)
-//========================================================================
-//-->
 <script type="javascript" title="Cloudflare Worker (worker.js)">
 // This is the content for your Worker script (e.g., worker.js or src/index.js)
 // Ensure you have `wrangler.toml` configured correctly, especially R2 bindings.
