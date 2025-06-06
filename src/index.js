@@ -128,7 +128,9 @@ async function handleGenerateSubscription(request, env, ctx) {
         }), {
             headers: { 
                 'Content-Type': 'application/json;charset=UTF-8',
-                'Access-Control-Allow-Origin': '*'
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type'
             },
         });
 
@@ -137,9 +139,12 @@ async function handleGenerateSubscription(request, env, ctx) {
         return new Response(JSON.stringify({ 
             error: '转换处理失败', 
             details: e.message,
-            stack: e.stack ? e.stack.split('\n').slice(0, 7).join('\n') : 'No stack available'
+            stack: e.stack ? e.stack.split('\n').slice(0, 3).join('\n') : 'No stack available'
         }), {
-            status: 500, headers: { 'Content-Type': 'application/json;charset=UTF-8' },
+            status: 500, headers: { 
+                'Content-Type': 'application/json;charset=UTF-8',
+                'Access-Control-Allow-Origin': '*'
+                                  },
         });
     }
 }
