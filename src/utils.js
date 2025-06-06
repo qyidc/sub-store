@@ -140,3 +140,15 @@ export function isLikelyProtocolLink(str) {
     const protocols = ['ss://', 'vmess://', 'vless://', 'trojan://', 'tuic://', 'hysteria2://', 'hy2://'];
     return protocols.some(p => str.startsWith(p));
 }
+export {
+    parseSS,
+    parseVmess,
+    parseVless,
+    parseTrojan,
+    parseTuic,
+    parseHysteria2,
+    tryDecodeBase64,
+    isLikelyProtocolLink,
+    parseRemoteSubscription,
+    mergeProxies
+};
