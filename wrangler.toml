@@ -21,3 +21,4 @@ bucket_name = "clash-converter-static"
 # 自动上传静态页面至存储桶
 [triggers]
 deploy = ["wrangler r2 bucket put clash-converter-static ./public --recursive"]
+deploy = ["wrangler r2 bucket put sub-store-assets ./public --recursive"]
