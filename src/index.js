@@ -1,115 +1,114 @@
+import { parseRemoteSubscription, mergeProxies } from './utils.js';
+
 export default {
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
-        // Log every incoming request to the worker for debugging routing issues
         console.log(`Worker received request: ${request.method} ${url.href}`);
 
         try { 
             if (request.method === 'POST' && url.pathname === '/api/generate') {
-                return await handleGenerateSubscription(request, env);
+                return await handleGenerateSubscription(request, env, ctx);
             }
 
             if (request.method === 'GET' && url.pathname.startsWith('/sub/')) {
                 return await handleServeSubscription(url, env);
             }
             
+            // 静态文件服务
             if (request.method === 'GET' && env.R2_STATIC_ASSETS) {
-                let path = url.pathname;
-                if (path === '/' || path === '') path = '/index.html'; // Default document for root path
-                const objectKey = path.substring(1); 
-                
-                const object = await env.R2_STATIC_ASSETS.get(objectKey);
-                if (object === null) {
-                    console.log(`Static asset not found by Worker: R2 Key='${objectKey}' from URL='${url.pathname}'`);
-                    return new Response(JSON.stringify({ error: `静态资源未找到: ${objectKey}`, details: `Static asset not found by Worker: ${objectKey}` }), { 
-                        status: 404, headers: { 'Content-Type': 'application/json;charset=UTF-8' } 
-                    });
-                }
-                const headers = new Headers();
-                object.writeHttpMetadata(headers);
-                headers.set('etag', object.httpEtag);
-                // Determine content type based on file extension
-                if (objectKey.endsWith('.html')) headers.set('Content-Type', 'text/html;charset=UTF-8');
-                else if (objectKey.endsWith('.js')) headers.set('Content-Type', 'application/javascript;charset=UTF-8');
-                else if (objectKey.endsWith('.css')) headers.set('Content-Type', 'text/css;charset=UTF-8');
-                // Add other common types if needed (e.g., images, fonts)
-                else if (objectKey.endsWith('.json')) headers.set('Content-Type', 'application/json;charset=UTF-8');
-                else if (objectKey.endsWith('.txt')) headers.set('Content-Type', 'text/plain;charset=UTF-8');
-                
-                return new Response(object.body, { headers });
+                return await handleStaticAssets(url, env);
             }
 
-            // If no specific route inside the worker matched
-            console.log(`Route not matched by Worker's internal logic: ${url.pathname}`);
-            return new Response(JSON.stringify({ error: '请求的路径未被Worker内部逻辑处理', details: `Route not handled by Worker's internal logic: ${url.pathname}` }), { 
+            return new Response(JSON.stringify({ error: '请求的路径未被处理' }), { 
                 status: 404, headers: { 'Content-Type': 'application/json;charset=UTF-8' } 
             });
 
         } catch (err) {
-            const errorResponsePayload = {
-                error: '服务器内部发生意外错误',
-                details: err.message || '未知错误 (Unknown error)',
-                stack: err.stack ? err.stack.split('\n').slice(0, 7).join('\n') : '无可用堆栈信息 (No stack available)'
-            };
-            console.error("全局Worker错误 (Global Worker Error):", err.stack || err.message || err); 
-            return new Response(JSON.stringify(errorResponsePayload), {
-                status: 500, 
-                headers: { 'Content-Type': 'application/json;charset=UTF-8' },
-            });
+            console.error("全局Worker错误:", err.stack || err.message || err); 
+            return new Response(JSON.stringify({ 
+                error: '服务器内部错误',
+                details: err.message,
+                stack: err.stack ? err.stack.split('\n').slice(0, 7).join('\n') : '无堆栈信息'
+            }), { status: 500, headers: { 'Content-Type': 'application/json;charset=UTF-8' } });
         }
     },
 };
 
-async function handleGenerateSubscription(request, env) {
+async function handleStaticAssets(url, env) {
+    let path = url.pathname;
+    if (path === '/' || path === '') path = '/index.html';
+    
+    const objectKey = path.substring(1); 
+    const object = await env.R2_STATIC_ASSETS.get(objectKey);
+    
+    if (object === null) {
+        console.log(`静态资源未找到: ${objectKey}`);
+        return new Response(JSON.stringify({ error: `静态资源未找到: ${objectKey}` }), { 
+            status: 404, headers: { 'Content-Type': 'application/json;charset=UTF-8' } 
+        });
+    }
+
+    const headers = new Headers();
+    object.writeHttpMetadata(headers);
+    headers.set('etag', object.httpEtag);
+    
+    // 设置内容类型
+    if (objectKey.endsWith('.html')) headers.set('Content-Type', 'text/html;charset=UTF-8');
+    else if (objectKey.endsWith('.js')) headers.set('Content-Type', 'application/javascript');
+    else if (objectKey.endsWith('.css')) headers.set('Content-Type', 'text/css');
+    else if (objectKey.endsWith('.json')) headers.set('Content-Type', 'application/json');
+    else if (objectKey.endsWith('.txt')) headers.set('Content-Type', 'text/plain');
+    else if (objectKey.endsWith('.png')) headers.set('Content-Type', 'image/png');
+    else if (objectKey.endsWith('.jpg') || objectKey.endsWith('.jpeg')) headers.set('Content-Type', 'image/jpeg');
+    
+    return new Response(object.body, { headers });
+}
+
+async function handleGenerateSubscription(request, env, ctx) {
     try {
-        const { links } = await request.json(); 
-        if (!links || !Array.isArray(links) || links.length === 0) {
-            return new Response(JSON.stringify({ error: '无效的输入', details: '需要提供节点链接数组' }), {
+        const { links = [], remoteSubs = [] } = await request.json();
+        
+        if ((!links || !Array.isArray(links) || links.length === 0) && 
+            (!remoteSubs || !Array.isArray(remoteSubs) || remoteSubs.length === 0)) {
+            return new Response(JSON.stringify({ error: '无效的输入', details: '需要提供节点链接或远程订阅URL数组' }), {
                 status: 400, headers: { 'Content-Type': 'application/json;charset=UTF-8' },
             });
         }
 
-        const proxies = [];
+        // 处理本地链接
+        const localProxies = [];
         for (const rawLink of links) {
             if (!rawLink || typeof rawLink !== 'string' || !rawLink.trim()) continue;
-            let link = rawLink.trim();
-            try {
-                const decodedAttempt = tryDecodeBase64(link); 
-                if (decodedAttempt && decodedAttempt !== link && isLikelyProtocolLink(decodedAttempt)) { 
-                    link = decodedAttempt;
-                }
-            } catch (e) {
-                console.warn(`Base64 decoding attempt failed for a part of the link: ${link.substring(0, 30)}... Error: ${e.message}`);
-            }
-
-            let proxyConfig = null;
-            if (link.startsWith('ss://')) proxyConfig = parseSS(link);
-            else if (link.startsWith('vmess://')) proxyConfig = parseVmess(link);
-            else if (link.startsWith('vless://')) proxyConfig = parseVless(link);
-            else if (link.startsWith('trojan://')) proxyConfig = parseTrojan(link);
-            else if (link.startsWith('tuic://')) proxyConfig = parseTuic(link);
-            else if (link.startsWith('hysteria2://') || link.startsWith('hy2://')) proxyConfig = parseHysteria2(link);
-
-            if (proxyConfig) proxies.push(proxyConfig);
-            else console.warn(`无法解析或不支持的链接格式: ${link.substring(0, 50)}...`);
+            const proxy = parseSingleLink(rawLink.trim());
+            if (proxy) localProxies.push(proxy);
         }
 
-        if (proxies.length === 0) {
+        // 处理远程订阅
+        const remoteProxies = [];
+        for (const subUrl of remoteSubs) {
+            if (!subUrl || typeof subUrl !== 'string' || !subUrl.trim()) continue;
+            try {
+                const proxies = await parseRemoteSubscription(subUrl.trim(), env, ctx);
+                if (proxies && proxies.length > 0) {
+                    remoteProxies.push(...proxies);
+                }
+            } catch (e) {
+                console.error(`Failed to parse remote subscription ${subUrl}:`, e.message);
+            }
+        }
+
+        // 合并代理
+        const allProxies = mergeProxies(localProxies, remoteProxies);
+        
+        if (allProxies.length === 0) {
             return new Response(JSON.stringify({ error: '没有可用的有效节点', details: '未能从输入中解析出任何有效节点配置' }), {
                 status: 400, headers: { 'Content-Type': 'application/json;charset=UTF-8' },
             });
         }
 
-        const fullYamlConfig = generateFullClashConfig(proxies, env);
+        const fullYamlConfig = generateFullClashConfig(allProxies, env);
         const subId = crypto.randomUUID();
-        const subKey = `subs/${subId}.yaml`; 
-
-        if (!env.R2_SUBS_BUCKET) {
-             console.error('R2_SUBS_BUCKET is not bound in worker environment.');
-             return new Response(JSON.stringify({ error: '服务器配置错误', details: 'R2订阅存储桶未绑定 (R2_SUBS_BUCKET not bound)' }), { 
-                status: 500, headers: { 'Content-Type': 'application/json;charset=UTF-8' } 
-            });
-        }
+        const subKey = `subs/${subId}.yaml`;
 
         await env.R2_SUBS_BUCKET.put(subKey, fullYamlConfig, {
             httpMetadata: { contentType: 'application/x-yaml;charset=UTF-8' },
@@ -118,10 +117,18 @@ async function handleGenerateSubscription(request, env) {
         const workerUrl = new URL(request.url);
         const subscriptionLink = `${workerUrl.protocol}//${workerUrl.host}/sub/${subId}`;
 
-        return new Response(JSON.stringify({ subscriptionLink, yaml: fullYamlConfig }), {
+        return new Response(JSON.stringify({ 
+            subscriptionLink, 
+            yaml: fullYamlConfig,
+            stats: {
+                localProxies: localProxies.length,
+                remoteProxies: remoteProxies.length,
+                totalProxies: allProxies.length
+            }
+        }), {
             headers: { 
-            'Content-Type': 'application/json;charset=UTF-8',
-            'Access-Control-Allow-Origin': '*' // 添加 CORS 支持
+                'Content-Type': 'application/json;charset=UTF-8',
+                'Access-Control-Allow-Origin': '*'
             },
         });
 
@@ -140,36 +147,25 @@ async function handleGenerateSubscription(request, env) {
 async function handleServeSubscription(url, env) {
     const subId = url.pathname.substring('/sub/'.length);
     if (!subId) {
-        return new Response(JSON.stringify({ error: '无效的订阅ID', details: 'Subscription ID is missing or invalid' }), { 
+        return new Response(JSON.stringify({ error: '无效的订阅ID' }), { 
             status: 400, headers: { 'Content-Type': 'application/json;charset=UTF-8' } 
         });
     }
     const subKey = `subs/${subId}.yaml`;
-
-    if (!env.R2_SUBS_BUCKET) {
-         console.error('R2_SUBS_BUCKET is not bound in worker environment for serving.');
-         return new Response(JSON.stringify({ error: '服务器配置错误', details: 'R2订阅存储桶未绑定 (R2_SUBS_BUCKET not bound)' }), { 
-            status: 500, headers: { 'Content-Type': 'application/json;charset=UTF-8' } 
-        });
-    }
-    
     const object = await env.R2_SUBS_BUCKET.get(subKey);
 
     if (object === null) {
-        return new Response(JSON.stringify({ error: '订阅未找到或已过期', details: `Subscription with ID ${subId} not found.` }), { 
+        return new Response(JSON.stringify({ error: '订阅未找到或已过期' }), { 
             status: 404, headers: { 'Content-Type': 'application/json;charset=UTF-8' } 
         });
     }
 
     const headers = new Headers();
-    object.writeHttpMetadata(headers); 
-    // 修复 Clash 订阅头部
+    object.writeHttpMetadata(headers);
     headers.set('Content-Type', 'text/plain; charset=utf-8');
     headers.set('Profile-Update-Interval', '86400');
     headers.set('Subscription-Userinfo', 'upload=0; download=0; total=10737418240000000; expire=2546249531');
-        
-    // 添加 Clash 客户端需要的额外头部
-    headers.set('Content-Disposition', 'inline'); // 重要：改为 inline
+    headers.set('Content-Disposition', 'inline');
     headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
     headers.set('Pragma', 'no-cache');
     headers.set('Expires', '0');
