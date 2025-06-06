@@ -160,14 +160,16 @@ async function handleServeSubscription(url, env) {
 
     const headers = new Headers();
     object.writeHttpMetadata(headers); 
-    headers.set('etag', object.httpEtag);
-    
-    // Clash 订阅专用头部
+    // 修复 Clash 订阅头部
     headers.set('Content-Type', 'text/plain; charset=utf-8');
-    headers.set('Content-Disposition', `attachment; filename="clash-subscription.yaml"`);
-    headers.set('Profile-Update-Interval', '86400'); // 24小时更新间隔
+    headers.set('Profile-Update-Interval', '86400');
     headers.set('Subscription-Userinfo', 'upload=0; download=0; total=10737418240000000; expire=2546249531');
-    headers.set('Profile-Title', 'Cloudflare转换订阅');
+        
+    // 添加 Clash 客户端需要的额外头部
+    headers.set('Content-Disposition', 'inline'); // 重要：改为 inline
+    headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    headers.set('Pragma', 'no-cache');
+    headers.set('Expires', '0');
     
     return new Response(object.body, { headers });
 }
