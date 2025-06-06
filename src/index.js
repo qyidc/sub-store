@@ -119,7 +119,10 @@ async function handleGenerateSubscription(request, env) {
         const subscriptionLink = `${workerUrl.protocol}//${workerUrl.host}/sub/${subId}`;
 
         return new Response(JSON.stringify({ subscriptionLink, yaml: fullYamlConfig }), {
-            headers: { 'Content-Type': 'application/json;charset=UTF-8' },
+            headers: { 
+            'Content-Type': 'application/json;charset=UTF-8',
+            'Access-Control-Allow-Origin': '*' // 添加 CORS 支持
+            },
         });
 
     } catch (e) { 
