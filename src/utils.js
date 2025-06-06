@@ -76,7 +76,7 @@ export function mergeProxies(localProxies = [], remoteProxies = []) {
     return allProxies;
 }
 
-function parseSingleLink(link) {
+export function parseSingleLink(link) {
     let proxy = null;
     if (link.startsWith('ss://')) proxy = parseSS(link);
     else if (link.startsWith('vmess://')) proxy = parseVmess(link);
@@ -87,7 +87,7 @@ function parseSingleLink(link) {
     return proxy;
 }
 
-function parseClashYaml(yamlContent) {
+export function parseClashYaml(yamlContent) {
     // 简化的YAML解析 - 实际实现可能需要使用YAML解析库
     try {
         const lines = yamlContent.split('\n');
