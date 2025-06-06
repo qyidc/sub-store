@@ -4,26 +4,6 @@ import {
     parseSingleLink
 } from './utils.js';
 
-function generateFullClashConfig(proxies, env) {
-    let yamlConfig = 'proxies:\n';
-    proxies.forEach(proxy => {
-        yamlConfig += `  - name: ${proxy.name}\n`;
-        yamlConfig += `    type: ${proxy.type}\n`;
-        yamlConfig += `    server: ${proxy.server}\n`;
-        yamlConfig += `    port: ${proxy.port}\n`;
-        if (proxy.cipher) {
-            yamlConfig += `    cipher: ${proxy.cipher}\n`;
-        }
-        if (proxy.password) {
-            yamlConfig += `    password: ${proxy.password}\n`;
-        }
-        if (proxy.udp) {
-            yamlConfig += `    udp: ${proxy.udp}\n`;
-        }
-    });
-    return yamlConfig;
-}
-
 export default {
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
