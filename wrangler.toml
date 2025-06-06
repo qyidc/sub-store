@@ -1,15 +1,19 @@
-name = "clash-sub-converter" # 你的Worker名称
-main = "src/index.js"       # Worker脚本入口文件 (例如 worker.js 或 src/index.js)
-compatibility_date = "2025-06-05" # 使用一个较新的兼容性日期
+name = "clash-sub-converter"
+main = "src/index.js"
+compatibility_date = "2025-06-05"
 
 # R2 存储桶绑定 - 用于存放生成的订阅文件
 [[r2_buckets]]
-binding = "R2_SUBS_BUCKET"               # 在Worker代码中通过 env.R2_SUBS_BUCKET 访问
-bucket_name = "my-clash-subs"          # 替换为你的实际R2桶名 (用于订阅)
-# preview_bucket_name = "your-clash-subs-preview" # 可选，用于 wrangler dev
+binding = "R2_SUBS_BUCKET"
+bucket_name = "my-clash-subs"
 
-# R2 存储桶绑定 - (可选) 用于存放前端静态文件，如果Worker也负责提供静态文件
+# R2 存储桶绑定 - 用于存放前端静态文件
 [[r2_buckets]]
 binding = "R2_STATIC_ASSETS"
 bucket_name = "clash-converter-static"
-# preview_bucket_name = "clash-converter-static-preview"
+
+# KV 命名空间绑定 - 用于缓存远程订阅内容
+[[kv_namespaces]]
+binding = "KV_REMOTE_CACHE"
+id = "remote_sub_cache"  # 替换为你的KV命名空间ID
+preview_id = "remote_sub_cache_preview"  # 可选，用于开发预览
