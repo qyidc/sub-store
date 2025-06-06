@@ -1,4 +1,3 @@
-<script type="javascript" title="Cloudflare Worker (index.js)">
 export default {
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
@@ -442,4 +441,3 @@ proxies:
 ${proxiesYaml}
 ${groupsAndRules}`;
 }
-</script>
