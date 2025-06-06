@@ -151,4 +151,4 @@ export {
     isLikelyProtocolLink,
     parseRemoteSubscription,
     mergeProxies
-};
+}
