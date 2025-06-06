@@ -15,5 +15,5 @@ bucket_name = "clash-converter-static"
 # KV 命名空间绑定 - 用于缓存远程订阅内容
 [[kv_namespaces]]
 binding = "KV_REMOTE_CACHE"
-id = "remote_sub_cache"  # 替换为你的KV命名空间ID
+id = "b46100b9a05a4f43a5396959a122d648"  # 替换为你的KV命名空间ID
 preview_id = "remote_sub_cache_preview"  # 可选，用于开发预览
