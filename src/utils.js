@@ -125,14 +125,27 @@ function parseClashYaml(yamlContent) {
 export function tryDecodeBase64(str) {
     try {
         if (!str || typeof str !== 'string') return str;
-        if (str.startsWith('vmess://')) return str; 
-        if (str.includes('://')) return str; 
-        const base64CharsRegex = /^[A-Za-z0-9+/]*={0,2}$/;
-        if (!base64CharsRegex.test(str)) return str; 
-        const decoded = atob(str); 
-        if (isLikelyProtocolLink(decoded)) return decoded; 
-        return str; 
-    } catch (e) { return str; }
+        if (str.startsWith('vmess://')) return str;
+        
+        // 尝试直接解码
+        try {
+            const decoded = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+            if (isLikelyProtocolLink(decoded)) return decoded;
+        } catch (e) {}
+        
+        // 尝试URI解码后再Base64解码
+        try {
+            const uriDecoded = decodeURIComponent(str);
+            if (uriDecoded !== str) {
+                const decoded = atob(uriDecoded);
+                if (isLikelyProtocolLink(decoded)) return decoded;
+            }
+        } catch (e) {}
+        
+        return str;
+    } catch (e) {
+        return str;
+    }
 }
 
 export function isLikelyProtocolLink(str) {
