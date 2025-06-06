@@ -11,3 +11,6 @@ bucket_name = "my-clash-subs"
 [[r2_buckets]]
 binding = "R2_STATIC_ASSETS"
 bucket_name = "clash-converter-static"
+
+[[r2_buckets.upload]]
+source = "./public"
