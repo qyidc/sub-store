@@ -11,6 +11,7 @@ bucket_name = "my-clash-subs"
 [[r2_buckets]]
 binding = "R2_STATIC_ASSETS"
 bucket_name = "clash-converter-static"
+bucket_commands = { put = ["wrangler r2 object put clash-converter-static ./public --recursive"] }
 
 # KV 命名空间绑定 - 用于缓存远程订阅内容
 # [[kv_namespaces]]
@@ -19,5 +20,5 @@ bucket_name = "clash-converter-static"
 # preview_id = "remote_sub_cache_preview"  # 可选，用于开发预览
 
 # 自动上传静态页面至存储桶
-[triggers]
-deploy = ["wrangler r2 bucket put clash-converter-static ./public --recursive"]
+#[triggers]
+#deploy = ["wrangler r2 bucket put clash-converter-static ./public --recursive"]
