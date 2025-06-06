@@ -137,8 +137,8 @@ async function handleGenerateSubscription(request, env) {
 async function handleServeSubscription(url, env) {
     const subId = url.pathname.substring('/sub/'.length);
     if (!subId) {
-        return new Response(JSON.stringify({ error: '无效的订阅ID', details: 'Subscription ID is missing or invalid' }), { 
-            status: 400, headers: { 'Content-Type': 'application/json;charset=UTF-8' } 
+       return new Response(JSON.stringify({ error: '无效的订阅ID', details: 'Subscription ID is missing or invalid' }), {
+          status: 400, headers: { 'Content-Type': 'application/json;charset=UTF-8' }
         });
     }
     const subKey = `subs/${subId}.yaml`;
