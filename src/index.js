@@ -1,4 +1,14 @@
-import { parseRemoteSubscription, mergeProxies } from './utils.js';
+import { 
+    parseSS, 
+    parseVmess, 
+    parseVless, 
+    parseTrojan, 
+    parseTuic, 
+    parseHysteria2, 
+    tryDecodeBase64, 
+    parseRemoteSubscription, 
+    mergeProxies 
+} from './utils.js';
 
 export default {
     async fetch(request, env, ctx) {
