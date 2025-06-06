@@ -161,6 +161,14 @@ async function handleServeSubscription(url, env) {
     const headers = new Headers();
     object.writeHttpMetadata(headers); 
     headers.set('etag', object.httpEtag);
+    
+    // Clash 订阅专用头部
+    headers.set('Content-Type', 'text/plain; charset=utf-8');
+    headers.set('Content-Disposition', `attachment; filename="clash-subscription.yaml"`);
+    headers.set('Profile-Update-Interval', '86400'); // 24小时更新间隔
+    headers.set('Subscription-Userinfo', 'upload=0; download=0; total=10737418240000000; expire=2546249531');
+    headers.set('Profile-Title', 'Cloudflare转换订阅');
+    
     return new Response(object.body, { headers });
 }
 
