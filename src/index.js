@@ -194,7 +194,7 @@ function isLikelyProtocolLink(str) {
 }
 
 // --- Protocol Parsers ---
-function parseSS(link) {
+export function parseSS(link) {
     try {
         const url = new URL(link);
         const name = url.hash ? decodeURIComponent(url.hash.substring(1)) : `SS-${url.hostname}:${url.port}`;
@@ -214,7 +214,7 @@ function parseSS(link) {
     } catch (e) { console.error(`SS解析失败: ${link.substring(0,50)} - ${e.message}`); return null; }
 }
 
-function parseVmess(link) {
+export function parseVmess(link) {
     try {
         const b64Config = link.substring('vmess://'.length);
         if (!b64Config) throw new Error("VMess: link content empty");
@@ -246,7 +246,7 @@ function parseVmess(link) {
     } catch (e) { console.error(`VMess解析失败: ${link.substring(0,50)} - ${e.message}`); return null; }
 }
 
-function parseVless(link) {
+export function parseVless(link) {
     try {
         const url = new URL(link);
         const name = url.hash ? decodeURIComponent(url.hash.substring(1)) : `VLESS-${url.hostname}:${url.port}`;
@@ -281,7 +281,7 @@ function parseVless(link) {
     } catch (e) { console.error(`VLESS解析失败: ${link.substring(0,50)} - ${e.message}`); return null; }
 }
 
-function parseTrojan(link) {
+export function parseTrojan(link) {
     try {
         const url = new URL(link);
         const name = url.hash ? decodeURIComponent(url.hash.substring(1)) : `Trojan-${url.hostname}:${url.port}`;
@@ -302,7 +302,7 @@ function parseTrojan(link) {
     } catch (e) { console.error(`Trojan解析失败: ${link.substring(0,50)} - ${e.message}`); return null; }
 }
 
-function parseTuic(link) {
+export function parseTuic(link) {
     try {
         const url = new URL(link);
         const name = url.hash ? decodeURIComponent(url.hash.substring(1)) : `TUIC-${url.hostname}:${url.port}`;
@@ -325,7 +325,7 @@ function parseTuic(link) {
     } catch (e) { console.error(`TUIC解析失败: ${link.substring(0,50)} - ${e.message}`); return null; }
 }
 
-function parseHysteria2(link) {
+export function parseHysteria2(link) {
     try {
         const url = new URL(link);
         const name = url.hash ? decodeURIComponent(url.hash.substring(1)) : `Hy2-${url.hostname}:${url.port}`;
