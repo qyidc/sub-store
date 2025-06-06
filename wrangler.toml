@@ -17,3 +17,7 @@ bucket_name = "clash-converter-static"
 binding = "KV_REMOTE_CACHE"
 id = "b46100b9a05a4f43a5396959a122d648"  # 替换为你的KV命名空间ID
 preview_id = "remote_sub_cache_preview"  # 可选，用于开发预览
+
+# 自动上传静态页面至存储桶
+[triggers]
+deploy = ["wrangler r2 bucket put clash-converter-static ./public --recursive"]
