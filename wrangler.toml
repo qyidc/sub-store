@@ -15,4 +15,4 @@ bucket_name = "sub-store-bucket" # 请替换为您实际创建的R2存储桶名�
 preview_bucket_name = "sub-store-bucket-preview" # 开发预览时使用的桶，可以和生产环境一样
 
 [observability.logs]
-enabled = tru
+enabled = true
