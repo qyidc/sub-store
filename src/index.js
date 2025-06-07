@@ -76,6 +76,11 @@ async function handleGenerateSubscription(request, env) {
         for (const rawLink of links) {
             if (!rawLink || typeof rawLink !== 'string' || !rawLink.trim()) continue;
             let link = rawLink.trim();
+            // 过滤 https:// 开头的链接
+            if (link.startsWith('https://')) {
+                console.warn(`本地节点链接不应包含订阅链接: ${link}`);
+                continue;
+            }
             try {
                 const decodedAttempt = tryDecodeBase64(link); 
                 if (decodedAttempt && decodedAttempt !== link && isLikelyProtocolLink(decodedAttempt)) { 
