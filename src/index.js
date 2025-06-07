@@ -98,48 +98,48 @@ async function handleGenerateSubscription(request, env) {
         }
 
         // 处理远程订阅链接
-       for (const subUrl of remoteSubs) {
-           if (!subUrl || typeof subUrl !== 'string' || !subUrl.trim()) continue;
-            try {
-                console.log(`开始获取远程订阅: ${subUrl}`);
-                const response = await fetch(subUrl);
-                if (!response.ok) {
-                    console.error(`获取远程订阅失败: ${subUrl}, 状态码: ${response.status}, 状态文本: ${response.statusText}`);
-                    throw new Error(`Failed to fetch subscription from ${subUrl}: ${response.statusText}`);
+      for (const subUrl of remoteSubs) {
+        if (!subUrl || typeof subUrl !== 'string' || !subUrl.trim()) continue;
+        try {
+            console.log(`开始获取远程订阅: ${subUrl}`);
+            // 添加请求头
+            const response = await fetch(subUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
             }
-            console.log(`成功获取远程订阅: ${subUrl}`);
-            const subscriptionContent = await response.text();
-            console.log(`远程订阅原始内容（前200字符）: ${subscriptionContent.substring(0, 200)}`);
+        });
+        if (!response.ok) {
+            console.error(`获取远程订阅失败: ${subUrl}, 状态码: ${response.status}, 状态文本: ${response.statusText}`);
+            throw new Error(`Failed to fetch subscription from ${subUrl}: ${response.statusText}`);
+        }
+        console.log(`成功获取远程订阅: ${subUrl}`);
+        const subscriptionContent = await response.text();
+        console.log(`获取到的远程订阅内容（前 500 字符）: ${subscriptionContent.substring(0, 500)}`);
 
-            // 尝试解析订阅内容
-            try {
-                const decodedContent = tryDecodeBase64(subscriptionContent);
-                console.log(`解码后的内容（前200字符）: ${decodedContent.substring(0, 200)}`);
-                const lines = decodedContent.split('\n').map(line => line.trim()).filter(line => line);
-                for (const line of lines) {
-                    console.log(`尝试解析链接: ${line}`);
-                    let proxyConfig = null;
-                    if (line.startsWith('ss://')) proxyConfig = parseSS(line);
-                    else if (line.startsWith('vmess://')) proxyConfig = parseVmess(line);
-                    else if (line.startsWith('vless://')) proxyConfig = parseVless(line);
-                    else if (line.startsWith('trojan://')) proxyConfig = parseTrojan(line);
-                    else if (line.startsWith('tuic://')) proxyConfig = parseTuic(line);
-                    else if (line.startsWith('hysteria2://') || line.startsWith('hy2://')) proxyConfig = parseHysteria2(line);
+        // 尝试解析订阅内容
+        try {
+            // 假设订阅内容是 Base64 编码的节点链接列表
+            const decodedContent = tryDecodeBase64(subscriptionContent);
+            const lines = decodedContent.split('\n').map(line => line.trim()).filter(line => line);
+            for (const line of lines) {
+                let proxyConfig = null;
+                if (line.startsWith('ss://')) proxyConfig = parseSS(line);
+                else if (line.startsWith('vmess://')) proxyConfig = parseVmess(line);
+                else if (line.startsWith('vless://')) proxyConfig = parseVless(line);
+                else if (line.startsWith('trojan://')) proxyConfig = parseTrojan(line);
+                else if (line.startsWith('tuic://')) proxyConfig = parseTuic(line);
+                else if (line.startsWith('hysteria2://') || line.startsWith('hy2://')) proxyConfig = parseHysteria2(line);
 
-                    if (proxyConfig) {
-                        console.log(`成功解析链接: ${line}`);
-                        proxies.push(proxyConfig);
-                    } else {
-                        console.warn(`无法解析或不支持的链接格式: ${line.substring(0, 50)}...`);
-                    }
-                }
-            } catch (e) {
-            console.error(`解析远程订阅 ${subUrl} 内容失败:`, e.message);
+                if (proxyConfig) proxies.push(proxyConfig);
+                else console.warn(`无法解析或不支持的链接格式: ${line.substring(0, 50)}...`);
             }
         } catch (e) {
-            console.error(`处理远程订阅 ${subUrl} 失败:`, e.message);
+            console.error(`解析远程订阅 ${subUrl} 内容失败:`, e.message);
         }
+    } catch (e) {
+        console.error(`处理远程订阅 ${subUrl} 失败:`, e.message);
     }
+}
         if (proxies.length === 0) {
         return new Response(JSON.stringify({ error: '没有可用的有效节点', details: '未能从输入中解析出任何有效节点配置' }), {
             status: 400, headers: { 'Content-Type': 'application/json;charset=UTF-8' },
