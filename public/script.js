@@ -1,116 +1,112 @@
-// --- DOM Elements ---
-const nodeLinksTextarea = document.getElementById('node-links');
-const convertButton = document.getElementById('convert-button');
-const convertButtonText = document.getElementById('convert-button-text');
-const convertIcon = document.getElementById('convert-icon');
-const convertLoader = document.getElementById('convert-loader');
+document.addEventListener('DOMContentLoaded', () => {
+    // --- DOM Elements ---
+    const subInput = document.getElementById('sub-input');
+    const convertBtn = document.getElementById('convert-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const resultArea = document.getElementById('result-area');
+    const clashDownloadBtn = document.getElementById('clash-download-btn');
+    const singboxDownloadBtn = document.getElementById('singbox-download-btn');
+    const errorMessage = document.getElementById('error-message');
+    const errorText = document.getElementById('error-text');
+    const btnText = document.getElementById('btn-text');
+    const loader = document.getElementById('loader');
 
-const resultsArea = document.getElementById('results-area');
-const yamlOutputPre = document.getElementById('yaml-output');
-const copyYamlButton = document.getElementById('copy-yaml-button');
-const subscriptionLinkInput = document.getElementById('subscription-link');
-const copyLinkButton = document.getElementById('copy-link-button');
-const toastMessageDiv = document.getElementById('toast-message');
+    // --- Event Listeners ---
 
-// --- Toast Notification Function ---
-function showToast(message, type = 'success', duration = 3000) {
-    toastMessageDiv.textContent = message;
-    toastMessageDiv.className = `toast ${type} show`; 
-    setTimeout(() => {
-        toastMessageDiv.className = `toast ${type}`; 
-    }, duration);
-}
+    // Convert button click handler
+    convertBtn.addEventListener('click', async () => {
+        const inputData = subInput.value.trim();
+        if (!inputData) {
+            showError('输入框不能为空。');
+            return;
+        }
 
-// --- Event Listeners ---
-convertButton.addEventListener('click', async () => {
-    const linksRaw = nodeLinksTextarea.value.trim();
-    if (!linksRaw) {
-        showToast('请输入节点链接!', 'error');
-        nodeLinksTextarea.focus();
-        return;
-    }
+        // --- UI State: Loading ---
+        setLoading(true);
+        hideError();
+        resultArea.classList.add('hidden');
 
-    const links = linksRaw.split('\n').map(link => link.trim()).filter(link => link);
-    if (links.length === 0) {
-        showToast('请输入有效的节点链接!', 'error');
-        nodeLinksTextarea.focus();
-        return;
-    }
+        try {
+            const response = await fetch('/convert', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'text/plain;charset=UTF-8',
+                },
+                body: inputData,
+            });
 
-    convertButton.disabled = true;
-    convertButtonText.textContent = '处理中...';
-    convertIcon.classList.add('hidden');
-    convertLoader.classList.remove('hidden');
-    resultsArea.classList.add('hidden');
-
-    try {
-        const apiUrl = new URL('/api/generate', window.location.origin).toString();
-        const response = await fetch(apiUrl, { 
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ links }),
-        });
-
-        if (!response.ok) {
-            let errorPayload = { error: `转换失败 (HTTP ${response.status})`, details: '', stack: '' };
-            let responseTextContent = '';
-            try {
-                responseTextContent = await response.text(); 
-                try {
-                    const jsonData = JSON.parse(responseTextContent);
-                    if (jsonData && jsonData.error) errorPayload = jsonData; 
-                    else {
-                        errorPayload.error = `Worker返回了状态 ${response.status} 但非标准错误JSON`;
-                        errorPayload.details = `收到JSON: ${responseTextContent.substring(0, 150)}...`;
-                    }
-                } catch (jsonParseError) {
-                    console.warn(`Worker error response (status ${response.status}) was text, not JSON:`, responseTextContent.substring(0,300));
-                    errorPayload.error = `转换失败 (HTTP ${response.status})`;
-                    errorPayload.details = `Worker返回了文本响应: ${responseTextContent.substring(0, 200)}...`;
-                }
-            } catch (textReadError) {
-                console.error(`无法读取Worker错误响应的文本内容 (status ${response.status}). Error:`, textReadError.message);
-                errorPayload.error = `转换失败 (HTTP ${response.status})`;
-                errorPayload.details = '无法读取Worker的错误响应内容。';
+            if (!response.ok) {
+                const errorMsg = await response.text();
+                throw new Error(errorMsg || `服务器错误: ${response.status}`);
             }
-            let errorMessageForToast = errorPayload.error;
-            if (errorPayload.details) errorMessageForToast += ` (详情: ${errorPayload.details.substring(0,200)})`; 
-            if (errorPayload.stack) console.error("Worker error stack (if provided):", errorPayload.stack);
-            throw new Error(errorMessageForToast);
-        }
 
-        const data = await response.json(); 
-        if (data.yaml && data.subscriptionLink) {
-            yamlOutputPre.textContent = data.yaml;
-            subscriptionLinkInput.value = data.subscriptionLink;
-            resultsArea.classList.remove('hidden');
-            showToast('转换成功!', 'success');
-        } else {
-            throw new Error(data.error || '从服务器返回的数据格式不正确');
+            const result = await response.json();
+
+            if (result.success) {
+                // --- UI State: Success ---
+                clashDownloadBtn.href = result.clashUrl;
+                singboxDownloadBtn.href = result.singboxUrl;
+                resultArea.classList.remove('hidden');
+            } else {
+                 throw new Error(result.message || '转换失败，但未提供明确原因。');
+            }
+
+        } catch (error) {
+            // --- UI State: Error ---
+            console.error('Fetch error:', error);
+            showError(error.message);
+        } finally {
+            // --- UI State: Reset ---
+            setLoading(false);
         }
-    } catch (error) { 
-        console.error('Error during conversion process:', error.message);
-        showToast(`转换出错: ${error.message}`, 'error', 7000); 
-        resultsArea.classList.add('hidden');
-    } finally {
-        convertButton.disabled = false;
-        convertButtonText.textContent = '生成配置和订阅';
-        convertIcon.classList.remove('hidden');
-        convertLoader.classList.add('hidden');
+    });
+
+    // Clear button click handler
+    clearBtn.addEventListener('click', () => {
+        subInput.value = '';
+        resultArea.classList.add('hidden');
+        hideError();
+    });
+    
+    // Hide error when user starts typing again
+    subInput.addEventListener('input', () => {
+        hideError();
+    });
+
+
+    // --- Helper Functions ---
+
+    /**
+     * Toggles the loading state of the convert button.
+     * @param {boolean} isLoading - Whether to show the loading state.
+     */
+    function setLoading(isLoading) {
+        if (isLoading) {
+            convertBtn.disabled = true;
+            convertBtn.classList.add('is-loading', 'cursor-not-allowed');
+            loader.classList.remove('hidden');
+            btnText.classList.add('hidden');
+        } else {
+            convertBtn.disabled = false;
+            convertBtn.classList.remove('is-loading', 'cursor-not-allowed');
+            loader.classList.add('hidden');
+            btnText.classList.remove('hidden');
+        }
+    }
+
+    /**
+     * Displays an error message.
+     * @param {string} message - The error message to display.
+     */
+    function showError(message) {
+        errorText.textContent = message;
+        errorMessage.classList.remove('hidden');
+    }
+
+    /**
+     * Hides the error message box.
+     */
+    function hideError() {
+        errorMessage.classList.add('hidden');
     }
 });
-
-copyYamlButton.addEventListener('click', () => copyToClipboard(yamlOutputPre.textContent, 'YAML 配置已复制!'));
-copyLinkButton.addEventListener('click', () => copyToClipboard(subscriptionLinkInput.value, '订阅链接已复制!'));
-
-function copyToClipboard(text, successMessage) {
-    if (!text) return;
-    const textArea = document.createElement('textarea');
-    textArea.value = text;
-    textArea.style.position = 'fixed'; 
-    document.body.appendChild(textArea);
-    textArea.focus(); textArea.select();
-    try { document.execCommand('copy'); showToast(successMessage, 'success'); } 
-    catch (err) { showToast('复制失败!', 'error'); console.error('Fallback: Oops, unable to copy', err); }
-    document.body.removeChild(textArea);
-}
