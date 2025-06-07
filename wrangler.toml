@@ -1,5 +1,5 @@
 # Cloudflare Worker 项目的配置文件
-name = "sub-store"
+name = "clash-sub-converter"
 main = "src/index.js"
 compatibility_date = "2023-10-30"
 
