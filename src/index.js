@@ -165,7 +165,7 @@ router.get(/^\/download\/(?<path>.+)$/, async ({ params, env }) => {
 /**
  * Handles GET requests for the Clash subscription link
  */
-router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env }) => {
+router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request }) => {
     const object = await env.SUB_STORE.get(params.path);
 
     if (object === null) {
@@ -176,7 +176,7 @@ router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env }) => {
     object.writeHttpMetadata(headers);
     headers.set('etag', object.httpEtag);
     // Add subscription-info header for Clash clients
-    const proxyCount = (object.body.match(/name:/g) || []).length;
+    const proxyCount = ((await object.text()).match(/name:/g) || []).length;
     headers.set('subscription-userinfo', `upload=0; download=0; total=107374182400; expire=${Math.floor(object.expires.getTime() / 1000)}`);
     headers.set('profile-update-interval', '24'); // 24 hours
     headers.set('profile-web-page-url', new URL(request.url).origin);
@@ -287,6 +287,7 @@ function parseTrojan(link) {
         name: decodeURIComponent(url.hash).substring(1) || url.hostname,
         type: 'trojan', server: url.hostname, port: parseInt(url.port, 10),
         password: url.username, udp: true, sni: params.get('sni') || url.hostname,
+        servername: params.get('sni') || url.hostname,
         alpn: params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"],
     };
 }
@@ -299,7 +300,7 @@ function parseTuic(link) {
         name: decodeURIComponent(url.hash).substring(1) || url.hostname,
         type: 'tuic', server: url.hostname, port: parseInt(url.port, 10),
         uuid: uuid, password: password,
-        sni: params.get('sni') || url.hostname,
+        servername: params.get('sni') || url.hostname,
         udp: true,
         'congestion-controller': params.get('congestion_control') || 'bbr',
         'udp-relay-mode': params.get('udp_relay_mode') || 'native',
@@ -315,7 +316,7 @@ function parseHysteria2(link) {
         name: decodeURIComponent(url.hash).substring(1) || url.hostname,
         type: 'hysteria2', server: url.hostname, port: parseInt(url.port, 10),
         password: url.username,
-        sni: params.get('sni') || url.hostname,
+        servername: params.get('sni') || url.hostname,
         udp: true,
         'skip-cert-verify': params.get('insecure') === '1' || params.get('skip_cert_verify') === 'true',
         obfs: params.get('obfs'),
@@ -393,33 +394,104 @@ function generateClashConfig(proxies) {
 	return serializeClash(config);
 }
 
+
+/**
+ * Generates a Sing-box configuration from a list of proxy objects.
+ * This function is more robust and handles the mapping from Clash-style objects
+ * to the format required by Sing-box, preventing the 'Cannot create property on boolean' error.
+ * @param {Array<Object>} proxies - An array of proxy objects.
+ * @returns {string} - A JSON string representing the Sing-box configuration.
+ */
 function generateSingboxConfig(proxies) {
-    // This is a simplified mapping. A real implementation needs more detail.
-	const outbounds = proxies.map(clashProxy => {
-        let singboxOutbound = { ...clashProxy }; // Start with a copy
-        singboxOutbound.tag = clashProxy.name;
-        singboxOutbound.server_port = clashProxy.port;
+    const outbounds = proxies.map(clashProxy => {
+        // Destructure all possible properties from the Clash-style proxy object
+        const {
+            name, type, server, port, password, uuid, alterId, cipher,
+            network, tls, udp, flow, 'client-fingerprint': fingerprint,
+            servername, alpn, 'reality-opts': realityOpts,
+            'ws-opts': wsOpts, 'grpc-opts': grpcOpts,
+            'congestion-controller': congestion, 'udp-relay-mode': udpRelayMode,
+            'skip-cert-verify': skipCertVerify, obfs, 'obfs-password': obfsPassword
+        } = clashProxy;
 
-        // Rename/map keys from Clash to Sing-box
-        if(singboxOutbound.servername) {
-            singboxOutbound.tls = singboxOutbound.tls || {};
-            singboxOutbound.tls.server_name = singboxOutbound.servername;
-            delete singboxOutbound.servername;
+        // Base structure for the Sing-box outbound object
+        const singboxOutbound = {
+            tag: name,
+            type: type,
+            server: server,
+            server_port: parseInt(port, 10),
+        };
+
+        // Add common properties based on protocol
+        if (uuid) singboxOutbound.uuid = uuid;
+        if (password) singboxOutbound.password = password;
+
+        // VLESS specific properties
+        if (type === 'vless') {
+            if (flow) singboxOutbound.flow = flow;
         }
-        if(singboxOutbound.network) {
-            singboxOutbound.transport = singboxOutbound.transport || {};
-            singboxOutbound.transport.type = singboxOutbound.network;
-             if (singboxOutbound.network === 'ws' && singboxOutbound['ws-opts']) {
-                singboxOutbound.transport.path = singboxOutbound['ws-opts'].path;
-                singboxOutbound.transport.headers = singboxOutbound['ws-opts'].headers;
+
+        // VMess specific properties
+        if (type === 'vmess') {
+            singboxOutbound.alter_id = alterId;
+            singboxOutbound.security = cipher || 'auto';
+        }
+
+        // TLS, Reality, and UTLS settings
+        if (tls) {
+            singboxOutbound.tls = {
+                enabled: true,
+                server_name: servername || server,
+                alpn: alpn,
+                insecure: skipCertVerify || false,
+            };
+            if (fingerprint) {
+                singboxOutbound.tls.utls = { enabled: true, fingerprint: fingerprint };
             }
-            delete singboxOutbound.network;
-            delete singboxOutbound['ws-opts'];
+            if (realityOpts) {
+                singboxOutbound.tls.reality = {
+                    enabled: true,
+                    public_key: realityOpts['public-key'],
+                    short_id: realityOpts['short-id'],
+                };
+            }
         }
-        // ... add more mappings as needed
-		return singboxOutbound;
-	});
+        
+        // Hysteria2 specific settings
+        if(type === 'hysteria2') {
+            if (obfs && obfsPassword) {
+                singboxOutbound.obfs = { type: 'salamander', password: obfsPassword };
+            }
+            singboxOutbound.up_mbps = 20; // Default values for sing-box
+            singboxOutbound.down_mbps = 100;
+        }
+        
+        // TUIC specific settings
+        if(type === 'tuic') {
+            singboxOutbound.congestion_control = congestion;
+            singboxOutbound.udp_relay_mode = udpRelayMode;
+            // sing-box uses TUIC v5 protocol
+            singboxOutbound.version = 'v5';
+        }
 
+        // Transport (WebSocket, gRPC) settings
+        if (network && network !== 'tcp') {
+            singboxOutbound.transport = { type: network };
+            if (network === 'ws' && wsOpts) {
+                singboxOutbound.transport.path = wsOpts.path;
+                if (wsOpts.headers && wsOpts.headers.Host) {
+                    singboxOutbound.transport.headers = { Host: wsOpts.headers.Host };
+                }
+            }
+            if (network === 'grpc' && grpcOpts) {
+                singboxOutbound.transport.service_name = grpcOpts['grpc-service-name'];
+            }
+        }
+
+        return singboxOutbound;
+    });
+
+    // Add selector, direct, and block outbounds
     outbounds.push(
         { type: 'selector', tag: 'PROXY', outbounds: proxies.map(p => p.name).concat(['DIRECT', 'REJECT']) },
         { type: 'direct', tag: 'DIRECT' },
@@ -427,6 +499,7 @@ function generateSingboxConfig(proxies) {
         { type: 'dns', tag: 'dns-out' }
     );
 
+    // Final Sing-box configuration structure
 	const config = {
 		log: { level: "info", timestamp: true },
 		inbounds: [{ type: "mixed", tag: "mixed-in", listen: "127.0.0.1", listen_port: 2080 }],
