@@ -3,69 +3,93 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>通用节点订阅转换器</title>
-    <!-- 引入Tailwind CSS -->
+    <title>通用订阅转换器</title>
+    <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 引入自定义 CSS 文件 -->
-    <link rel="stylesheet" href="styles.css">
+    <!-- Link to custom styles -->
+    <link rel="stylesheet" href="/styles.css">
+    <!-- Favicon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔄</text></svg>">
 </head>
-<body class="bg-gray-100 min-h-screen flex flex-col items-center justify-center p-4 selection:bg-blue-200">
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
 
-    <div class="bg-white p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-2xl">
-        <header class="mb-6 sm:mb-8 text-center">
-            <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">通用节点订阅转换器</h1>
-            <p class="text-gray-600 mt-2 text-sm sm:text-base">粘贴节点链接，生成 Clash YAML 配置和订阅链接。</p>
+    <div class="min-h-screen flex flex-col items-center justify-center p-4">
+        
+        <header class="text-center mb-8">
+            <h1 class="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white">通用订阅转换器</h1>
+            <p class="mt-2 text-lg text-gray-500 dark:text-gray-400">粘贴分享链接或订阅地址，一键生成通用配置</p>
         </header>
 
-        <main>
-            <div class="mb-6">
-                <label for="node-links" class="block text-sm font-medium text-gray-700 mb-1">节点链接 (每行一个):</label>
-                <textarea id="node-links" rows="8" class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out placeholder-gray-400 text-sm" placeholder="例如: vmess://... 或 ss://... (支持Base64编码链接)"></textarea>
+        <main class="w-full max-w-2xl bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
+            <!-- Input Area -->
+            <div>
+                <label for="sub-input" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">订阅链接 / 分享链接 (支持多行)</label>
+                <div class="relative">
+                    <textarea id="sub-input" rows="8" class="block w-full text-sm text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500 p-2.5 transition" placeholder="vless://...&#10;https://example.com/sub..."></textarea>
+                    <button id="clear-btn" class="absolute top-2 right-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1 rounded-full" title="清空输入">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                          <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
             </div>
 
-            <div class="flex flex-col sm:flex-row sm:space-x-4 space-y-3 sm:space-y-0 mb-6">
-                <button id="convert-button" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-4 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition duration-150 ease-in-out flex items-center justify-center">
-                    <svg id="convert-icon" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd" />
-                        <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v12a1 1 0 11-2 0V4a1 1 0 011-1z" clip-rule="evenodd" />
-                    </svg>
-                    <span id="convert-button-text">生成配置和订阅</span>
-                    <div id="convert-loader" class="loader hidden ml-2" style="width:20px; height:20px; border-width:2px;"></div>
-                </button>
-            </div>
+            <!-- Action Button -->
+            <button id="convert-btn" class="w-full text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 dark:focus:ring-blue-800 font-medium rounded-lg text-sm px-5 py-3 text-center transition-all duration-200 ease-in-out flex items-center justify-center">
+                <span id="btn-text">立即转换</span>
+                <svg id="loader" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            </button>
             
-            <div id="results-area" class="hidden">
-                <div class="mb-6">
-                    <label for="yaml-output" class="block text-sm font-medium text-gray-700 mb-1">Clash YAML 配置:</label>
-                    <div class="relative">
-                        <pre id="yaml-output" class="w-full p-3 bg-gray-50 border border-gray-300 rounded-lg shadow-sm text-xs max-h-60 overflow-y-auto whitespace-pre-wrap break-all"></pre>
-                        <button id="copy-yaml-button" class="absolute top-2 right-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs font-semibold py-1 px-2 rounded focus:outline-none focus:ring-2 focus:ring-gray-400 transition">
-                            复制YAML
-                        </button>
+            <!-- Result Area -->
+            <div id="result-area" class="hidden space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <h3 class="text-lg font-semibold text-gray-800 dark:text-white">转换成功！</h3>
+                
+                <!-- Clash Result -->
+                <div class="p-4 bg-gray-100 dark:bg-gray-700 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="font-semibold text-gray-900 dark:text-white">Clash 配置</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">适用于 Clash for Windows, ClashX, Clash Verge 等</p>
+                        </div>
+                        <a id="clash-download-btn" href="#" download class="inline-flex items-center px-3 py-2 text-sm font-medium text-center text-white bg-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 dark:focus:ring-green-800">
+                            下载
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                        </a>
                     </div>
                 </div>
 
-                <div>
-                    <label for="subscription-link" class="block text-sm font-medium text-gray-700 mb-1">Clash 订阅链接:</label>
-                    <div class="flex">
-                        <input type="text" id="subscription-link" readonly class="w-full p-3 border border-gray-300 rounded-l-lg bg-gray-50 shadow-sm text-xs focus:outline-none">
-                        <button id="copy-link-button" class="bg-green-500 hover:bg-green-600 text-white font-semibold py-2.5 px-4 rounded-r-lg shadow-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition duration-150 ease-in-out whitespace-nowrap">
-                            复制链接
-                        </button>
+                <!-- Sing-box Result -->
+                <div class="p-4 bg-gray-100 dark:bg-gray-700 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="font-semibold text-gray-900 dark:text-white">Sing-box 配置</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">适用于 Sing-box 内核的客户端</p>
+                        </div>
+                        <a id="singbox-download-btn" href="#" download class="inline-flex items-center px-3 py-2 text-sm font-medium text-center text-white bg-green-600 rounded-lg hover:bg-green-700 focus:ring-4 focus:ring-green-300 dark:focus:ring-green-800">
+                           下载
+                           <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                        </a>
                     </div>
                 </div>
+
+            </div>
+
+            <!-- Error Message -->
+            <div id="error-message" class="hidden p-4 text-sm text-red-700 bg-red-100 rounded-lg dark:bg-red-200 dark:text-red-800" role="alert">
+                <span class="font-medium">错误:</span> <span id="error-text"></span>
             </div>
         </main>
-
-        <footer class="mt-8 text-center">
-            <p class="text-xs text-gray-500">Cloudflare Worker + R2 驱动 | 界面使用 Tailwind CSS</p>
+        
+        <footer class="mt-8 text-center text-sm text-gray-500 dark:text-gray-400">
+            <p>由 Cloudflare Workers & R2 强力驱动</p>
         </footer>
+
     </div>
 
-    <!-- 消息提示框 -->
-    <div id="toast-message" class="toast"></div>
-
-    <!-- 引入自定义 JS 文件 -->
-    <script src="script.js"></script>
+    <!-- Link to frontend script -->
+    <script src="/script.js"></script>
 </body>
 </html>
