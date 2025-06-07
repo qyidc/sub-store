@@ -141,9 +141,7 @@ async function handleGenerateSubscription(request, env) {
         }
 
     // 输出节点数量，确认是否有多个节点
-    console.log(`解析出的有效节点数量: ${proxies.length}`);
-
-    const fullYamlConfig = generateFullClashConfig(proxies, env);
+    console.log(`解析出的有效节点数量: ${proxies.length}`);    
 
         const fullYamlConfig = generateFullClashConfig(proxies, env);
         const subId = crypto.randomUUID();
