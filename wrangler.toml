@@ -4,7 +4,7 @@ main = "src/index.js"
 compatibility_date = "2023-10-30"
 
 # 账户ID，您需要将其替换为您的Cloudflare账户ID
-# account_id = "YOUR_ACCOUNT_ID"
+# account_id = "sft333@gmail.com"
 
 # 绑定R2存储桶
 # 您需要在Cloudflare仪表盘预先创建一个R2存储桶，并将其名称填入下方
