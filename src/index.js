@@ -73,7 +73,29 @@ async function handleGenerateSubscription(request, env) {
         const proxies = [];
 
         // 处理本地节点链接
-        // ... existing code ...
+        for (const rawLink of links) {
+            if (!rawLink || typeof rawLink !== 'string' || !rawLink.trim()) continue;
+            let link = rawLink.trim();
+            try {
+                const decodedAttempt = tryDecodeBase64(link); 
+                if (decodedAttempt && decodedAttempt !== link && isLikelyProtocolLink(decodedAttempt)) { 
+                    link = decodedAttempt;
+                }
+            } catch (e) {
+                console.warn(`Base64 decoding attempt failed for a part of the link: ${link.substring(0, 30)}... Error: ${e.message}`);
+            }
+
+            let proxyConfig = null;
+            if (link.startsWith('ss://')) proxyConfig = parseSS(link);
+            else if (link.startsWith('vmess://')) proxyConfig = parseVmess(link);
+            else if (link.startsWith('vless://')) proxyConfig = parseVless(link);
+            else if (link.startsWith('trojan://')) proxyConfig = parseTrojan(link);
+            else if (link.startsWith('tuic://')) proxyConfig = parseTuic(link);
+            else if (link.startsWith('hysteria2://') || link.startsWith('hy2://')) proxyConfig = parseHysteria2(link);
+
+            if (proxyConfig) proxies.push(proxyConfig);
+            else console.warn(`无法解析或不支持的链接格式: ${link.substring(0, 50)}...`);
+        }
 
         // 处理远程订阅链接
         for (const subUrl of remoteSubs) {
@@ -85,7 +107,7 @@ async function handleGenerateSubscription(request, env) {
                     throw new Error(`Failed to fetch subscription from ${subUrl}: ${response.statusText}`);
                 }
                 const subscriptionContent = await response.text();
-                console.log(`成功获取远程订阅内容，前 200 字符: ${subscriptionContent.substring(0, 200)}`);
+                console.log(`成功获取远程订阅内容，长度: ${subscriptionContent.length}`);
 
                 // 尝试解析 Base64 编码的订阅内容
                 let decodedContent = subscriptionContent;
@@ -93,7 +115,7 @@ async function handleGenerateSubscription(request, env) {
                     const base64Decoded = atob(subscriptionContent);
                     if (base64Decoded) {
                         decodedContent = base64Decoded;
-                        console.log('成功解码 Base64 订阅内容，前 200 字符: ', decodedContent.substring(0, 200));
+                        console.log('成功解码 Base64 订阅内容');
                     }
                 } catch (e) {
                     console.log('订阅内容不是 Base64 编码，使用原始内容');
@@ -103,7 +125,6 @@ async function handleGenerateSubscription(request, env) {
                 for (const line of lines) {
                     const trimmedLine = line.trim();
                     if (!trimmedLine) continue;
-                    console.log(`尝试解析链接: ${trimmedLine.substring(0, 50)}`);
                     let proxyConfig = null;
                     if (trimmedLine.startsWith('ss://')) proxyConfig = parseSS(trimmedLine);
                     else if (trimmedLine.startsWith('vmess://')) proxyConfig = parseVmess(trimmedLine);
@@ -112,12 +133,8 @@ async function handleGenerateSubscription(request, env) {
                     else if (trimmedLine.startsWith('tuic://')) proxyConfig = parseTuic(trimmedLine);
                     else if (trimmedLine.startsWith('hysteria2://') || trimmedLine.startsWith('hy2://')) proxyConfig = parseHysteria2(trimmedLine);
 
-                    if (proxyConfig) {
-                        proxies.push(proxyConfig);
-                        console.log(`成功解析链接: ${trimmedLine.substring(0, 50)}`);
-                    } else {
-                        console.warn(`无法解析或不支持的远程订阅链接格式: ${trimmedLine.substring(0, 50)}...`);
-                    }
+                    if (proxyConfig) proxies.push(proxyConfig);
+                    else console.warn(`无法解析或不支持的远程订阅链接格式: ${trimmedLine.substring(0, 50)}...`);
                 }
             } catch (e) {
                 console.error(`处理远程订阅 ${subUrl} 时出错:`, e.message);
@@ -131,9 +148,40 @@ async function handleGenerateSubscription(request, env) {
             });
         }
 
-        // ... existing code ...
+        const fullYamlConfig = generateFullClashConfig(proxies, env);
+        const subId = crypto.randomUUID();
+        const subKey = `subs/${subId}.yaml`; 
+
+        if (!env.R2_SUBS_BUCKET) {
+             console.error('R2_SUBS_BUCKET is not bound in worker environment.');
+             return new Response(JSON.stringify({ error: '服务器配置错误', details: 'R2订阅存储桶未绑定 (R2_SUBS_BUCKET not bound)' }), { 
+                status: 500, headers: { 'Content-Type': 'application/json;charset=UTF-8' } 
+            });
+        }
+
+        await env.R2_SUBS_BUCKET.put(subKey, fullYamlConfig, {
+            httpMetadata: { contentType: 'application/x-yaml;charset=UTF-8' },
+        });
+        
+        const workerUrl = new URL(request.url);
+        const subscriptionLink = `${workerUrl.protocol}//${workerUrl.host}/sub/${subId}`;
+
+        return new Response(JSON.stringify({ subscriptionLink, yaml: fullYamlConfig }), {
+            headers: { 
+            'Content-Type': 'application/json;charset=UTF-8',
+            'Access-Control-Allow-Origin': '*' // 添加 CORS 支持
+            },
+        });
+
     } catch (e) { 
-        // ... existing code ...
+        console.error('Error in handleGenerateSubscription:', e.stack || e.message || e);
+        return new Response(JSON.stringify({ 
+            error: '转换处理失败', 
+            details: e.message,
+            stack: e.stack ? e.stack.split('\n').slice(0, 7).join('\n') : 'No stack available'
+        }), {
+            status: 500, headers: { 'Content-Type': 'application/json;charset=UTF-8' },
+        });
     }
 }
 
