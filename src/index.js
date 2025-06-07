@@ -101,12 +101,27 @@ async function handleGenerateSubscription(request, env) {
         for (const subUrl of remoteSubs) {
             if (!subUrl || typeof subUrl !== 'string' || !subUrl.trim()) continue;
             try {
+                console.log(`开始请求远程订阅链接: ${subUrl}`);
                 const response = await fetch(subUrl);
                 if (!response.ok) {
                     throw new Error(`Failed to fetch subscription from ${subUrl}: ${response.statusText}`);
                 }
                 const subscriptionContent = await response.text();
-                const lines = subscriptionContent.split('\n');
+                console.log(`成功获取远程订阅内容，长度: ${subscriptionContent.length}`);
+
+                // 尝试解析 Base64 编码的订阅内容
+                let decodedContent = subscriptionContent;
+                try {
+                    const base64Decoded = atob(subscriptionContent);
+                    if (base64Decoded) {
+                        decodedContent = base64Decoded;
+                        console.log('成功解码 Base64 订阅内容');
+                    }
+                } catch (e) {
+                    console.log('订阅内容不是 Base64 编码，使用原始内容');
+                }
+
+                const lines = decodedContent.split('\n');
                 for (const line of lines) {
                     const trimmedLine = line.trim();
                     if (!trimmedLine) continue;
@@ -122,11 +137,12 @@ async function handleGenerateSubscription(request, env) {
                     else console.warn(`无法解析或不支持的远程订阅链接格式: ${trimmedLine.substring(0, 50)}...`);
                 }
             } catch (e) {
-                console.error(`Failed to process remote subscription ${subUrl}:`, e.message);
+                console.error(`处理远程订阅 ${subUrl} 时出错:`, e.message);
             }
         }
 
         if (proxies.length === 0) {
+            console.log('未找到有效节点，links 数量:', links.length, 'remoteSubs 数量:', remoteSubs.length);
             return new Response(JSON.stringify({ error: '没有可用的有效节点', details: '未能从输入中解析出任何有效节点配置' }), {
                 status: 400, headers: { 'Content-Type': 'application/json;charset=UTF-8' },
             });
