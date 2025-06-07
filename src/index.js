@@ -1,559 +1,515 @@
-export default {
-    async fetch(request, env, ctx) {
-        const url = new URL(request.url);
-        // Log every incoming request to the worker for debugging routing issues
-        console.log(`Worker received request: ${request.method} ${url.href}`);
+/**
+ * Welcome to Cloudflare Workers!
+ *
+ * This is the core logic of your application. It handles:
+ * 1. Serving the static frontend (HTML, CSS, JS) from an R2 bucket.
+ * 2. Handling API requests from the frontend to convert subscription links.
+ * 3. Parsing different proxy protocols.
+ * 4. Generating Clash and Sing-box configuration files.
+ * 5. Storing the generated files back into the R2 bucket.
+ * 6. Providing download links for the generated files.
+ *
+ * @see https://developers.cloudflare.com/workers/
+ */
 
-        try { 
-            if (request.method === 'POST' && url.pathname === '/api/generate') {
-                return await handleGenerateSubscription(request, env);
-            }
+// A simple router
+const Router = () => {
+	const routes = [];
+	const add = (method, path, handler) => routes.push({ method, path, handler });
+	const handle = async (request, env, ctx) => {
+		const url = new URL(request.url);
+		for (const route of routes) {
+			if (request.method !== route.method) continue;
+			const match = url.pathname.match(route.path);
+			if (match) {
+				const params = match.groups || {};
+				return await route.handler({ request, params, url, env, ctx });
+			}
+		}
 
-            if (request.method === 'GET' && url.pathname.startsWith('/sub/')) {
-                return await handleServeSubscription(url, env);
-            }
-            
-            if (request.method === 'GET' && env.R2_STATIC_ASSETS) {
-                let path = url.pathname;
-                if (path === '/' || path === '') path = '/index.html'; // Default document for root path
-                const objectKey = path.substring(1); 
-                
-                const object = await env.R2_STATIC_ASSETS.get(objectKey);
-                if (object === null) {
-                    console.log(`Static asset not found by Worker: R2 Key='${objectKey}' from URL='${url.pathname}'`);
-                    return new Response(JSON.stringify({ error: `静态资源未找到: ${objectKey}`, details: `Static asset not found by Worker: ${objectKey}` }), { 
-                        status: 404, headers: { 'Content-Type': 'application/json;charset=UTF-8' } 
-                    });
-                }
-                const headers = new Headers();
-                object.writeHttpMetadata(headers);
-                headers.set('etag', object.httpEtag);
-                // Determine content type based on file extension
-                if (objectKey.endsWith('.html')) headers.set('Content-Type', 'text/html;charset=UTF-8');
-                else if (objectKey.endsWith('.js')) headers.set('Content-Type', 'application/javascript;charset=UTF-8');
-                else if (objectKey.endsWith('.css')) headers.set('Content-Type', 'text/css;charset=UTF-8');
-                // Add other common types if needed (e.g., images, fonts)
-                else if (objectKey.endsWith('.json')) headers.set('Content-Type', 'application/json;charset=UTF-8');
-                else if (objectKey.endsWith('.txt')) headers.set('Content-Type', 'text/plain;charset=UTF-8');
-                
-                return new Response(object.body, { headers });
-            }
+		// Fallback for static assets for GET requests
+		if (request.method === 'GET') {
+			return serveStaticAsset({ request, env });
+		}
 
-            // If no specific route inside the worker matched
-            console.log(`Route not matched by Worker's internal logic: ${url.pathname}`);
-            return new Response(JSON.stringify({ error: '请求的路径未被Worker内部逻辑处理', details: `Route not handled by Worker's internal logic: ${url.pathname}` }), { 
-                status: 404, headers: { 'Content-Type': 'application/json;charset=UTF-8' } 
-            });
-
-        } catch (err) {
-            const errorResponsePayload = {
-                error: '服务器内部发生意外错误',
-                details: err.message || '未知错误 (Unknown error)',
-                stack: err.stack ? err.stack.split('\n').slice(0, 7).join('\n') : '无可用堆栈信息 (No stack available)'
-            };
-            console.error("全局Worker错误 (Global Worker Error):", err.stack || err.message || err); 
-            return new Response(JSON.stringify(errorResponsePayload), {
-                status: 500, 
-                headers: { 'Content-Type': 'application/json;charset=UTF-8' },
-            });
-        }
-    },
+		return new Response('Not Found', { status: 404 });
+	};
+	return {
+		get: (path, handler) => add('GET', path, handler),
+		post: (path, handler) => add('POST', path, handler),
+		handle,
+	};
 };
 
-async function handleGenerateSubscription(request, env) {
-    try {
-        const { links = [], remoteSubs = [] } = await request.json(); 
-        if ((!links || !Array.isArray(links) || links.length === 0) && 
-            (!remoteSubs || !Array.isArray(remoteSubs) || remoteSubs.length === 0)) {
-            return new Response(JSON.stringify({ error: '无效的输入', details: '需要提供节点链接数组或远程订阅链接数组' }), {
-                status: 400, headers: { 'Content-Type': 'application/json;charset=UTF-8' },
-            });
-        }
 
-        const proxies = [];
+const router = Router();
 
-        // 处理本地节点链接
-        for (const rawLink of links) {
-            if (!rawLink || typeof rawLink !== 'string' || !rawLink.trim()) continue;
-            let link = rawLink.trim();
-            // 过滤 https:// 开头的链接
-            if (link.startsWith('https://')) {
-                console.warn(`本地节点链接不应包含订阅链接: ${link}`);
-                continue;
-            }
-            try {
-                const decodedAttempt = tryDecodeBase64(link); 
-                if (decodedAttempt && decodedAttempt !== link && isLikelyProtocolLink(decodedAttempt)) { 
-                    link = decodedAttempt;
-                }
-            } catch (e) {
-                console.warn(`Base64 decoding attempt failed for a part of the link: ${link.substring(0, 30)}... Error: ${e.message}`);
-            }
+/**
+ * Handles POST requests to /convert
+ * This is where the main conversion logic happens.
+ */
+router.post(/^\/convert$/, async ({ request, env }) => {
+	try {
+		const body = await request.text();
+		if (!body) {
+			return new Response('Request body is empty.', { status: 400 });
+		}
 
-            let proxyConfig = null;
-            if (link.startsWith('ss://')) proxyConfig = parseSS(link);
-            else if (link.startsWith('vmess://')) proxyConfig = parseVmess(link);
-            else if (link.startsWith('vless://')) proxyConfig = parseVless(link);
-            else if (link.startsWith('trojan://')) proxyConfig = parseTrojan(link);
-            else if (link.startsWith('tuic://')) proxyConfig = parseTuic(link);
-            else if (link.startsWith('hysteria2://') || link.startsWith('hy2://')) proxyConfig = parseHysteria2(link);
+		const lines = body.split(/[\r\n]+/).filter(line => line.trim() !== '');
+		let allProxies = [];
 
-            if (proxyConfig) proxies.push(proxyConfig);
-            else console.warn(`无法解析或不支持的链接格式: ${link.substring(0, 50)}...`);
-        }
+		for (const line of lines) {
+			if (line.startsWith('http://') || line.startsWith('https://')) {
+				// It's a remote subscription link
+				const response = await fetch(line);
+				if (!response.ok) continue;
+				const content = await response.text();
+				const remoteLines = content.split(/[\r\n]+/).filter(l => l.trim() !== '');
+				for (const remoteLine of remoteLines) {
+					const proxies = await parseShareLink(remoteLine);
+					allProxies.push(...proxies);
+				}
+			} else {
+				// It's a direct share link
+				const proxies = await parseShareLink(line);
+				allProxies.push(...proxies);
+			}
+		}
 
-        // 处理远程订阅链接
-        for (const subUrl of remoteSubs) {
-    if (!subUrl || typeof subUrl !== 'string' || !subUrl.trim()) continue;
-    try {
-        console.log(`开始获取远程订阅: ${subUrl}`);
-        const response = await fetch(subUrl);
-        if (!response.ok) {
-            console.error(`获取远程订阅失败: ${subUrl}, 状态码: ${response.status}, 状态文本: ${response.statusText}`);
-            throw new Error(`Failed to fetch subscription from ${subUrl}: ${response.statusText}`);
-        }
-        console.log(`成功获取远程订阅: ${subUrl}`);
-        const subscriptionContent = await response.text();
+		if (allProxies.length === 0) {
+			return new Response('No valid proxy nodes found.', { status: 400 });
+		}
+		
+		// Remove duplicate proxies by name
+		allProxies = allProxies.filter((proxy, index, self) =>
+            index === self.findIndex((p) => (
+                p.name === proxy.name
+            ))
+        );
 
-        // 输出订阅内容的前 100 个字符，方便调试
-        console.log(`远程订阅 ${subUrl} 的内容前 100 字符: ${subscriptionContent.substring(0, 100)}`);
 
-        // 尝试解析订阅内容
-        try {
-            let decodedContent = subscriptionContent;
-            // 尝试 Base64 解码
-            try {
-                const possibleDecoded = tryDecodeBase64(subscriptionContent);
-                if (possibleDecoded !== subscriptionContent) {
-                    decodedContent = possibleDecoded;
-                    console.log(`成功对远程订阅 ${subUrl} 的内容进行 Base64 解码`);
-                }
-            } catch (e) {
-                console.warn(`对远程订阅 ${subUrl} 的内容进行 Base64 解码失败: ${e.message}`);
-            }
+		// Generate configurations
+		const clashConfig = generateClashConfig(allProxies);
+		const singboxConfig = generateSingboxConfig(allProxies);
 
-            const lines = decodedContent.split('\n').map(line => line.trim()).filter(line => line);
-            for (const line of lines) {
-                let proxyConfig = null;
-                if (line.startsWith('ss://')) proxyConfig = parseSS(line);
-                else if (line.startsWith('vmess://')) proxyConfig = parseVmess(line);
-                else if (line.startsWith('vless://')) proxyConfig = parseVless(line);
-                else if (line.startsWith('trojan://')) proxyConfig = parseTrojan(line);
-                else if (line.startsWith('tuic://')) proxyConfig = parseTuic(line);
-                else if (line.startsWith('hysteria2://') || line.startsWith('hy2://')) proxyConfig = parseHysteria2(line);
+		// Store files in R2
+		const fileId = crypto.randomUUID();
+		const clashKey = `configs/clash-${fileId}.yaml`;
+		const singboxKey = `configs/singbox-${fileId}.json`;
 
-                if (proxyConfig) proxies.push(proxyConfig);
-                else console.warn(`无法解析或不支持的链接格式: ${line.substring(0, 50)}...`);
-            }
-        } catch (e) {
-            console.error(`解析远程订阅 ${subUrl} 内容失败:`, e.message);
-        }
-    } catch (e) {
-        console.error(`处理远程订阅 ${subUrl} 失败:`, e.message);
-    }
+		await env.SUB_STORE.put(clashKey, clashConfig, {
+			httpMetadata: { contentType: 'application/x-yaml; charset=utf-8' },
+		});
+		await env.SUB_STORE.put(singboxKey, singboxConfig, {
+			httpMetadata: { contentType: 'application/json; charset=utf-8' },
+		});
+
+		return new Response(JSON.stringify({
+			success: true,
+			clashUrl: `/download/${clashKey}`,
+			singboxUrl: `/download/${singboxKey}`,
+		}), {
+			headers: { 'Content-Type': 'application/json' },
+		});
+
+	} catch (error) {
+		console.error('Conversion error:', error);
+		return new Response(`An error occurred: ${error.message}`, { status: 500 });
+	}
+});
+
+/**
+ * Handles GET requests to /download/:key
+ * Serves the generated configuration files from R2.
+ */
+router.get(/^\/download\/(?<key>.+)$/, async ({ params, env }) => {
+	const { key } = params;
+	const object = await env.SUB_STORE.get(key);
+
+	if (object === null) {
+		return new Response('Object Not Found', { status: 404 });
+	}
+
+	const headers = new Headers();
+	object.writeHttpMetadata(headers);
+	headers.set('etag', object.httpEtag);
+	// Add Content-Disposition to suggest a filename for download
+	const filename = key.split('/').pop();
+	headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+
+	return new Response(object.body, {
+		headers,
+	});
+});
+
+
+/**
+ * Serves static assets from the R2 bucket.
+ * This function handles requests for frontend files like index.html, script.js, etc.
+ */
+async function serveStaticAsset({ request, env }) {
+	const url = new URL(request.url);
+	let key = url.pathname.slice(1);
+
+	if (key === '') {
+		key = 'index.html';
+	}
+
+	const object = await env.SUB_STORE.get(key);
+
+	if (object === null) {
+		return new Response(`Object Not Found: ${key}`, { status: 404 });
+	}
+
+	const headers = new Headers();
+	object.writeHttpMetadata(headers);
+	headers.set('etag', object.httpEtag);
+
+	// Determine content type based on file extension
+	const fileExtension = key.split('.').pop();
+	if (fileExtension === 'html') headers.set('Content-Type', 'text/html; charset=utf-8');
+	if (fileExtension === 'css') headers.set('Content-Type', 'text/css; charset=utf-8');
+	if (fileExtension === 'js') headers.set('Content-Type', 'application/javascript; charset=utf-8');
+
+	return new Response(object.body, {
+		headers,
+	});
 }
 
-        if (proxies.length === 0) {
-            return new Response(JSON.stringify({ error: '没有可用的有效节点', details: '未能从输入中解析出任何有效节点配置' }), {
-                status: 400, headers: { 'Content-Type': 'application/json;charset=UTF-8' },
-            });
-        }
-    
-        // 输出节点数量，确认是否有多个节点
-        console.log(`解析出的有效节点数量: ${proxies.length}`);
-    
-        const fullYamlConfig = generateFullClashConfig(proxies, env);
+/**
+ * Main fetch event handler.
+ */
+export default {
+	async fetch(request, env, ctx) {
+		return router.handle(request, env, ctx);
+	},
+};
 
-        if (!env.R2_SUBS_BUCKET) {
-             console.error('R2_SUBS_BUCKET is not bound in worker environment.');
-             return new Response(JSON.stringify({ error: '服务器配置错误', details: 'R2订阅存储桶未绑定 (R2_SUBS_BUCKET not bound)' }), { 
-                status: 500, headers: { 'Content-Type': 'application/json;charset=UTF-8' } 
-            });
-        }
+// --- Conversion and Parsing Logic ---
 
-        await env.R2_SUBS_BUCKET.put(subKey, fullYamlConfig, {
-            httpMetadata: { contentType: 'application/x-yaml;charset=UTF-8' },
-        });
-        
-        const workerUrl = new URL(request.url);
-        const subscriptionLink = `${workerUrl.protocol}//${workerUrl.host}/sub/${subId}`;
-
-        return new Response(JSON.stringify({ subscriptionLink, yaml: fullYamlConfig }), {
-            headers: { 
-            'Content-Type': 'application/json;charset=UTF-8',
-            'Access-Control-Allow-Origin': '*' // 添加 CORS 支持
-            },
-        });
-
-    } catch (e) { 
-        console.error('Error in handleGenerateSubscription:', e.stack || e.message || e);
-        return new Response(JSON.stringify({ 
-            error: '转换处理失败', 
-            details: e.message,
-            stack: e.stack ? e.stack.split('\n').slice(0, 7).join('\n') : 'No stack available'
-        }), {
-            status: 500, headers: { 'Content-Type': 'application/json;charset=UTF-8' },
-        });
-    }
-}
-
-async function handleServeSubscription(url, env) {
-    const subId = url.pathname.substring('/sub/'.length);
-    if (!subId) {
-        return new Response(JSON.stringify({ error: '无效的订阅ID', details: 'Subscription ID is missing or invalid' }), { 
-            status: 400, headers: { 'Content-Type': 'application/json;charset=UTF-8' } 
-        });
-    }
-    const subKey = `subs/${subId}.yaml`;
-
-    if (!env.R2_SUBS_BUCKET) {
-         console.error('R2_SUBS_BUCKET is not bound in worker environment for serving.');
-         return new Response(JSON.stringify({ error: '服务器配置错误', details: 'R2订阅存储桶未绑定 (R2_SUBS_BUCKET not bound)' }), { 
-            status: 500, headers: { 'Content-Type': 'application/json;charset=UTF-8' } 
-        });
-    }
-    
-    const object = await env.R2_SUBS_BUCKET.get(subKey);
-
-    if (object === null) {
-        return new Response(JSON.stringify({ error: '订阅未找到或已过期', details: `Subscription with ID ${subId} not found.` }), { 
-            status: 404, headers: { 'Content-Type': 'application/json;charset=UTF-8' } 
-        });
-    }
-
-    const headers = new Headers();
-    object.writeHttpMetadata(headers); 
-    // 修复 Clash 订阅头部
-    headers.set('Content-Type', 'text/plain; charset=utf-8');
-    headers.set('Profile-Update-Interval', '86400');
-    headers.set('Subscription-Userinfo', 'upload=0; download=0; total=10737418240000000; expire=2546249531');
-        
-    // 添加 Clash 客户端需要的额外头部
-    headers.set('Content-Disposition', 'inline'); // 重要：改为 inline
-    headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    headers.set('Pragma', 'no-cache');
-    headers.set('Expires', '0');
-    
-    return new Response(object.body, { headers });
-}
-
-function tryDecodeBase64(str) {
-    try {
-        if (!str || typeof str !== 'string') return str;
-        if (str.startsWith('vmess://')) return str; 
-        if (str.includes('://')) return str; 
-        const base64CharsRegex = /^[A-Za-z0-9+/]*={0,2}$/;
-        if (!base64CharsRegex.test(str)) return str; 
-        const decoded = atob(str); 
-        if (isLikelyProtocolLink(decoded)) return decoded; 
-        return str; 
-    } catch (e) { return str; }
-}
-
-function isLikelyProtocolLink(str) {
-    if (typeof str !== 'string') return false;
-    const protocols = ['ss://', 'vmess://', 'vless://', 'trojan://', 'tuic://', 'hysteria2://', 'hy2://'];
-    return protocols.some(p => str.startsWith(p));
-}
-
-function parseSS(link) {
-    try {
-        const url = new URL(link);
-        const name = url.hash ? decodeURIComponent(url.hash.substring(1)) : `SS-${url.hostname}:${url.port}`;
-        let userInfo = '';
-        if (url.username && url.password) userInfo = `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`;
-        else if (url.username) { 
+/**
+ * Parses a share link (e.g., vless://, trojan://)
+ * @param {string} link The share link
+ * @returns {Promise<Object[]>} A promise that resolves to an array of proxy objects
+ */
+async function parseShareLink(link) {
+	try {
+        // Handle Base64 encoded links
+        let decodedLink = link;
+        // A simple check for potential Base64 content
+        if (!link.includes('://') && (link.length % 4 === 0)) {
              try {
-                const decodedUserInfo = atob(url.username); 
-                if (decodedUserInfo.includes(':')) userInfo = decodedUserInfo;
-                else if (decodeURIComponent(url.username).includes(':') && !url.password) userInfo = decodeURIComponent(url.username);
-                else userInfo = decodeURIComponent(url.username);
-             } catch (e) { userInfo = decodeURIComponent(url.username); }
+                decodedLink = atob(link);
+             } catch (e) {
+                // Not a valid base64 string, proceed with original link
+             }
         }
-        const [method, password = ''] = userInfo.split(':', 2); 
-        if (!method) { console.warn(`SS: missing method - ${link.substring(0,50)}`); return null; }
-        return { name, type: 'ss', server: url.hostname, port: parseInt(url.port), cipher: method, password, udp: true };
-    } catch (e) { console.error(`SS解析失败: ${link.substring(0,50)} - ${e.message}`); return null; }
+        
+		if (decodedLink.startsWith('vless://')) {
+			return [parseVless(decodedLink)];
+		}
+		if (decodedLink.startsWith('vmess://')) {
+			// In a real app, you would parse the Base64 encoded JSON here
+			return [parseVmess(decodedLink)];
+		}
+		if (decodedLink.startsWith('trojan://')) {
+			return [parseTrojan(decodedLink)];
+		}
+		// Add other protocols here...
+		// e.g., if (decodedLink.startsWith('ss://')) return [parseSS(decodedLink)];
+		// e.g., if (decodedLink.startsWith('tuic://')) return [parseTuic(decodedLink)];
+		// e.g., if (decodedLink.startsWith('hysteria2://')) return [parseHysteria2(decodedLink)];
+	} catch (error) {
+		console.warn(`Skipping invalid link: ${link.substring(0, 30)}...`, error.message);
+		return []; // Return empty array for invalid links
+	}
+	return [];
 }
 
-function parseVmess(link) {
-    try {
-        const b64Config = link.substring('vmess://'.length);
-        if (!b64Config) throw new Error("VMess: link content empty");
-        const jsonConfigStr = atob(b64Config);
-        const vmessConfig = JSON.parse(jsonConfigStr);
-        if (!vmessConfig.add || !vmessConfig.id) { console.warn(`VMess: missing server or uuid - ${link.substring(0,50)}`); return null;}
-        const proxy = {
-            name: vmessConfig.ps || `VMess-${vmessConfig.add}`, type: 'vmess', server: vmessConfig.add, port: parseInt(vmessConfig.port),
-            uuid: vmessConfig.id, alterId: parseInt(vmessConfig.aid || '0'), cipher: vmessConfig.scy || 'auto', tls: vmessConfig.tls === 'tls', udp: true,
-            network: vmessConfig.net || 'tcp',
-        };
-        if (proxy.tls) {
-            proxy.servername = vmessConfig.sni || vmessConfig.host || vmessConfig.add;
-            if (vmessConfig.allowInsecure === true || String(vmessConfig.allowInsecure) === 'true' || vmessConfig.skipVerify === true) proxy['skip-cert-verify'] = true;
-            if (vmessConfig.fp) proxy['client-fingerprint'] = vmessConfig.fp;
-        }
-        if (vmessConfig.net === 'ws') {
-            proxy['ws-opts'] = { path: vmessConfig.path || '/', headers: { Host: vmessConfig.host || vmessConfig.add }};
-            if (vmessConfig.wsHeaders && typeof vmessConfig.wsHeaders === 'object') proxy['ws-opts'].headers = { ...proxy['ws-opts'].headers, ...vmessConfig.wsHeaders };
-        } else if (vmessConfig.net === 'tcp' && vmessConfig.type === 'http') {
-             proxy.tcp_opts = { header: { type: "http", request: vmessConfig.request, response: vmessConfig.response }};
-        } else if (vmessConfig.net === 'h2') {
-            proxy['h2-opts'] = { path: vmessConfig.path || '/', host: Array.isArray(vmessConfig.host) ? vmessConfig.host : [vmessConfig.host || vmessConfig.add].filter(Boolean)};
-        } else if (vmessConfig.net === 'grpc') {
-            proxy['grpc-opts'] = { 'grpc-service-name': vmessConfig.path || vmessConfig.serviceName || ''};
-            if (vmessConfig.mode === 'multi') proxy['grpc-opts']['grpc-mode'] = 'multi';
-        }
-        return proxy;
-    } catch (e) { console.error(`VMess解析失败: ${link.substring(0,50)} - ${e.message}`); return null; }
-}
 
+/**
+ * Parses a VLESS link. This is a detailed example.
+ * @param {string} link - The VLESS share link.
+ * @returns {Object} A Clash-compatible proxy object.
+ */
 function parseVless(link) {
-    try {
-        const url = new URL(link);
-        const name = url.hash ? decodeURIComponent(url.hash.substring(1)) : `VLESS-${url.hostname}:${url.port}`;
-        const params = url.searchParams;
-        if (!url.username) { console.warn(`VLESS: missing uuid - ${link.substring(0,50)}`); return null; }
-        const proxy = {
-            name, type: 'vless', server: url.hostname, port: parseInt(url.port), uuid: url.username, udp: true, 
-            tls: params.get('security') === 'tls' || params.get('security') === 'xtls', network: params.get('type') || 'tcp',
-        };
-        if (proxy.tls) {
-            proxy.servername = params.get('sni') || url.hostname;
-            if (params.get('fp')) proxy['client-fingerprint'] = params.get('fp');
-            if (params.get('alpn')) proxy.alpn = params.get('alpn').split(',').map(s => s.trim()).filter(Boolean);
-            if (params.get('allowInsecure') === '1' || params.get('allowInsecure') === 'true') proxy['skip-cert-verify'] = true;
-            if (params.get('security') === 'xtls') proxy.flow = params.get('flow') || 'xtls-rprx-vision'; 
-            if (params.get('pbk')) proxy.publicKey = params.get('pbk');
-            if (params.get('sid')) proxy.shortId = params.get('sid');
-        }
-        if (proxy.network === 'ws') {
-            proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || url.hostname }};
-            if (params.get('maxEarlyData') && params.get('earlyDataHeaderName')) {
-                proxy['ws-opts']['max-early-data'] = parseInt(params.get('maxEarlyData'));
-                proxy['ws-opts']['early-data-header-name'] = params.get('earlyDataHeaderName');
-            }
-        } else if (proxy.network === 'grpc') {
-            proxy['grpc-opts'] = { 'grpc-service-name': params.get('serviceName') || params.get('path') || ''};
-            if (params.get('mode') === 'multi') proxy['grpc-opts']['grpc-mode'] = 'multi';
-        } else if (proxy.network === 'h2') {
-            proxy['h2-opts'] = { path: params.get('path') || '/', host: params.get('host') ? params.get('host').split(',').map(s => s.trim()).filter(Boolean) : [url.hostname].filter(Boolean)};
-        }
-        return proxy;
-    } catch (e) { console.error(`VLESS解析失败: ${link.substring(0,50)} - ${e.message}`); return null; }
-}
+	const url = new URL(link);
+	const params = url.searchParams;
 
-function parseTrojan(link) {
-    try {
-        const url = new URL(link);
-        const name = url.hash ? decodeURIComponent(url.hash.substring(1)) : `Trojan-${url.hostname}:${url.port}`;
-        const params = url.searchParams;
-        const password = url.password || url.username;
-        if (!password) { console.warn(`Trojan: missing password - ${link.substring(0,50)}`); return null;}
-        const proxy = {
-            name, type: 'trojan', server: url.hostname, port: parseInt(url.port), password, udp: true, 
-            sni: params.get('sni') || params.get('peer') || url.hostname,
-        };
-        if (params.get('allowInsecure') === '1' || params.get('skip-cert-verify') === '1' || params.get('allowInsecure') === 'true' ) proxy['skip-cert-verify'] = true;
-        if (params.get('alpn')) proxy.alpn = params.get('alpn').split(',').map(s=>s.trim()).filter(Boolean);
-        if (params.get('type') === 'ws' || params.get('network') === 'ws') {
-            proxy.network = 'ws';
-            proxy['ws-opts'] = { path: params.get('path') || params.get('wsPath') || '/', headers: { Host: params.get('host') || params.get('wsHost') || url.hostname }};
-        }
-        return proxy;
-    } catch (e) { console.error(`Trojan解析失败: ${link.substring(0,50)} - ${e.message}`); return null; }
-}
+	const proxy = {
+		name: decodeURIComponent(url.hash).substring(1) || url.hostname,
+		type: 'vless',
+		server: url.hostname,
+		port: parseInt(url.port, 10),
+		uuid: url.username,
+		network: params.get('type') || 'tcp',
+		tls: params.get('security') === 'tls',
+		udp: true, // Commonly enabled
+		flow: params.get('flow') || '',
+		'client-fingerprint': params.get('fp') || 'chrome',
+	};
 
-function parseTuic(link) {
-    try {
-        const url = new URL(link);
-        const name = url.hash ? decodeURIComponent(url.hash.substring(1)) : `TUIC-${url.hostname}:${url.port}`;
-        const params = url.searchParams;
-        let uuid = url.username; 
-        let password = url.password || ''; 
-        if (url.username && url.username.includes(':') && !url.password) [uuid, password] = url.username.split(':', 2);
-        if (!uuid) { console.warn(`TUIC: missing uuid/token - ${link.substring(0,50)}`); return null; }
-        const proxy = {
-            name, type: 'tuic', server: url.hostname, port: parseInt(url.port), uuid, password,
-            sni: params.get('sni') || url.hostname,
-            'congestion-controller': params.get('congestion_control') || params.get('congestion-controller') || 'bbr',
-            'udp-relay-mode': params.get('udp_relay_mode') || params.get('udp-relay-mode') || 'native',
-            alpn: params.get('alpn') ? params.get('alpn').split(',').map(s=>s.trim()).filter(Boolean) : ['h3'],
-        };
-        if (params.get('allow_insecure') === '1' || params.get('skip-cert-verify') === '1' || params.get('allow_insecure') === 'true') proxy['skip-cert-verify'] = true;
-        if (params.get('disable_sni') === 'true') proxy.sni = ''; 
-        if (params.get('reduce-rtt')) proxy['reduce-rtt'] = params.get('reduce-rtt') === 'true';
-        return proxy;
-    } catch (e) { console.error(`TUIC解析失败: ${link.substring(0,50)} - ${e.message}`); return null; }
-}
+	if (proxy.tls) {
+		proxy.servername = params.get('sni') || url.hostname;
+		proxy.alpn = params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"];
+		if (params.get('security') === 'reality') {
+			proxy.reality-opts = {
+				'public-key': params.get('pbk'),
+				'short-id': params.get('sid'),
+			};
+		}
+	}
 
-function parseHysteria2(link) {
-    try {
-        const url = new URL(link);
-        const name = url.hash ? decodeURIComponent(url.hash.substring(1)) : `Hy2-${url.hostname}:${url.port}`;
-        const params = url.searchParams;
-        const password = url.password || url.username;
-        if (!password) { console.warn(`Hysteria2: missing password - ${link.substring(0,50)}`); return null;}
-        const proxy = {
-            name, type: 'hysteria2', server: url.hostname, port: parseInt(url.port), password, 
-            sni: params.get('sni') || url.hostname,
-        };
-        if (params.get('insecure') === '1' || params.get('skip-cert-verify') === 'true' || params.get('allowInsecure') === 'true') proxy['skip-cert-verify'] = true;
-        if (params.get('obfs')) {
-            proxy.obfs = params.get('obfs');
-            proxy['obfs-password'] = params.get('obfs-password') || params.get('obfs_password') || '';
-        }
-        if (params.get('upmbps')) proxy.up = `${params.get('upmbps')} Mbps`;
-        else if (params.get('up')) proxy.up = params.get('up');
-        if (params.get('downmbps')) proxy.down = `${params.get('downmbps')} Mbps`;
-        else if (params.get('down')) proxy.down = params.get('down');
-        if(params.get('alpn')) proxy.alpn = params.get('alpn').split(',').map(s=>s.trim()).filter(Boolean);
-        return proxy;
-    } catch (e) { console.error(`Hysteria2解析失败: ${link.substring(0,50)} - ${e.message}`); return null; }
-}
-
-function escapeYamlString(str) {
-    if (typeof str !== 'string') return String(str); 
-    return `"${str.replace(/"/g, '\\"')}"`;
-}
-
-function objectToYamlParts(obj, baseIndent) {
-    const parts = [];
-    for (const key in obj) {
-        if (obj.hasOwnProperty(key)) {
-            const value = obj[key];
-            let valueStr;
-            if (typeof value === 'string') {
-                valueStr = escapeYamlString(value); 
-            } else if (typeof value === 'boolean' || typeof value === 'number') {
-                valueStr = value.toString();
-            } else if (Array.isArray(value)) {
-                if (value.length === 0)  valueStr = '[]';
-                else valueStr = `\n${value.map(item => `${baseIndent}  - ${escapeYamlString(item)}`).join('\n')}`;
-            } else if (typeof value === 'object' && value !== null) {
-                const nestedParts = objectToYamlParts(value, baseIndent + '  ');
-                valueStr = nestedParts.length === 0 ? '{}' : `\n${nestedParts.join('\n')}`;
-            } else if (value === null) {
-                valueStr = 'null';
-            } else continue; 
-            parts.push(`${baseIndent}${key}: ${valueStr}`);
-        }
-    }
-
-    return parts;
-}
-
-function generateFullClashConfig(proxies, env) {
-    const proxyNames = proxies.map((p, i) => p.name || `${p.type || 'Proxy'}-${i}` ).filter((value, index, self) => self.indexOf(value) === index);
+	if (proxy.network === 'ws') {
+		proxy['ws-opts'] = {
+			path: params.get('path') || '/',
+			headers: { Host: params.get('host') || url.hostname }
+		};
+	}
     
-    function escapeYamlString(str) {
-        if (typeof str !== 'string') return String(str); 
-        return `"${str.replace(/"/g, '\\"')}"`;
+    // Add support for other network types like gRPC
+    if (proxy.network === 'grpc') {
+        proxy['grpc-opts'] = {
+            'grpc-service-name': params.get('serviceName') || '',
+        };
     }
 
-    function objectToYamlParts(obj, baseIndent) {
-        const parts = [];
-        for (const key in obj) {
-            if (obj.hasOwnProperty(key)) {
-                const value = obj[key];
-                let valueStr;
-                if (typeof value === 'string') {
-                    valueStr = escapeYamlString(value); 
-                } else if (typeof value === 'boolean' || typeof value === 'number') {
-                    valueStr = value.toString();
-                } else if (Array.isArray(value)) {
-                    if (value.length === 0)  valueStr = '[]';
-                    else valueStr = `\n${value.map(item => `${baseIndent}  - ${escapeYamlString(item)}`).join('\n')}`;
-                } else if (typeof value === 'object' && value !== null) {
-                    const nestedParts = objectToYamlParts(value, baseIndent + '  ');
-                    valueStr = nestedParts.length === 0 ? '{}' : `\n${nestedParts.join('\n')}`;
-                } else if (value === null) {
-                    valueStr = 'null';
-                } else continue; 
-                parts.push(`${baseIndent}${key}: ${valueStr}`);
-            }
-        }
-
-        return parts;
-    }
-
-    let proxiesYaml = proxies.map((p_orig, index) => {
-        const p = {...p_orig}; 
-        p.name = p.name || `${p.type || 'Proxy'}-${index}`; 
-        let parts = [`  - name: ${escapeYamlString(p.name)}`]; 
-        const { name: _, ...otherFields } = p; 
-        parts.push(...objectToYamlParts(otherFields, '    '));
-        return parts.join('\n');
-    }).join('\n\n'); 
-
-    const uniqueProxyNamesForGroup = proxyNames.length > 0 ? proxyNames : ['DIRECT'];
-    const groupsAndRules = `
-proxy-groups:
-  - name: "🔰 PROXY" 
-    type: select
-    proxies:
-${uniqueProxyNamesForGroup.map(name => `      - ${escapeYamlString(name)}`).join('\n')}
-      - DIRECT
-      - REJECT
-  - name: "🎯 Auto" 
-    type: url-test
-    url: http://www.gstatic.com/generate_204 
-    interval: 300 
-    tolerance: 150 
-    proxies:
-${uniqueProxyNamesForGroup.map(name => `      - ${escapeYamlString(name)}`).join('\n')}
-  - name: "🌍 Global" 
-    type: select
-    proxies:
-      - "🔰 PROXY"
-      - "🎯 Auto"
-      - DIRECT
-rules:
-  - GEOIP,CN,DIRECT
-  - GEOSITE,CN,DIRECT
-  - GEOSITE,PRIVATE,DIRECT
-  - MATCH,🔰 PROXY`;
-
-    return `port: 7890
-socks-port: 7891
-allow-lan: true
-mode: rule 
-log-level: info 
-external-controller: '0.0.0.0:9090'
-dns:
-  enable: true
-  listen: 0.0.0.0:5353 
-  ipv6: false 
-  enhanced-mode: fake-ip 
-  fake-ip-range: 198.18.0.1/16
-  nameserver:
-    - 223.5.5.5
-    - 119.29.29.29
-    - 1.1.1.1
-    - https://doh.pub/dns-query
-    - https://dns.alidns.com/dns-query
-  fallback:
-    - 8.8.8.8
-    - tls://1.0.0.1:853
-    - tls://dns.google:853
-  fallback-filter:
-    geoip: true
-    geoip-code: CN
-proxies:
-${proxiesYaml}
-${groupsAndRules}`;
+	return proxy;
 }
 
-// 新增 fetchSubscriptionContent 函数
-async function fetchSubscriptionContent(subUrl) {
-    try {
-        const response = await fetch(subUrl);
-        if (!response.ok) {
-            throw new Error(`获取订阅内容失败，状态码: ${response.status}`);
+/**
+ * Placeholder parser for VMess links.
+ * @param {string} link - The VMess share link.
+ * @returns {Object} A placeholder proxy object.
+ */
+function parseVmess(link) {
+    const base64String = link.substring('vmess://'.length);
+    const decodedJson = atob(base64String);
+    const vmessConfig = JSON.parse(decodedJson);
+
+    return {
+        name: vmessConfig.ps || vmessConfig.add,
+        type: 'vmess',
+        server: vmessConfig.add,
+        port: vmessConfig.port,
+        uuid: vmessConfig.id,
+        alterId: vmessConfig.aid,
+        cipher: vmessConfig.scy || 'auto',
+        tls: vmessConfig.tls === 'tls',
+        network: vmessConfig.net || 'tcp',
+        udp: true,
+        'ws-opts': vmessConfig.net === 'ws' ? {
+            path: vmessConfig.path || '/',
+            headers: { Host: vmessConfig.host || vmessConfig.add }
+        } : undefined
+    };
+}
+
+
+/**
+ * Placeholder parser for Trojan links.
+ * @param {string} link - The Trojan share link.
+ * @returns {Object} A Clash-compatible proxy object.
+ */
+function parseTrojan(link) {
+	const url = new URL(link);
+	const params = url.searchParams;
+    return {
+        name: decodeURIComponent(url.hash).substring(1) || url.hostname,
+        type: 'trojan',
+        server: url.hostname,
+        port: parseInt(url.port, 10),
+        password: url.username,
+        udp: true,
+        sni: params.get('sni') || url.hostname,
+        alpn: params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"],
+    };
+}
+
+
+// --- Configuration Generators ---
+
+/**
+ * Generates a Clash configuration file content.
+ * @param {Object[]} proxies - An array of proxy objects.
+ * @returns {string} The YAML content for the Clash config.
+ */
+function generateClashConfig(proxies) {
+	const proxyNames = proxies.map(p => p.name);
+
+	// Using js-yaml's dump function would be more robust,
+	// but for a zero-dependency worker, template strings are fine.
+	const config = {
+		'port': 7890,
+		'socks-port': 7891,
+		'allow-lan': false,
+		'mode': 'rule',
+		'log-level': 'info',
+		'external-controller': '127.0.0.1:9090',
+		'proxies': proxies,
+		'proxy-groups': [{
+			'name': 'PROXY',
+			'type': 'select',
+			'proxies': ['DIRECT', ...proxyNames],
+		}],
+		'rules': [
+			'DOMAIN-SUFFIX,google.com,PROXY',
+			'DOMAIN-KEYWORD,google,PROXY',
+			'DOMAIN-SUFFIX,github.com,PROXY',
+			'DOMAIN-KEYWORD,github,PROXY',
+			'DOMAIN-SUFFIX,telegram.org,PROXY',
+			'MATCH,DIRECT',
+		],
+	};
+
+	// A simple manual YAML serializer
+	const toYaml = (obj, indent = 0) => {
+		let yamlString = '';
+		const space = ' '.repeat(indent);
+		for (const key in obj) {
+			const value = obj[key];
+			if (Array.isArray(value)) {
+				yamlString += `${space}${key}:\n`;
+				value.forEach(item => {
+					if (typeof item === 'object' && item !== null) {
+						yamlString += `${space}  - ${toYaml(item, indent + 4).trimStart().substring(2)}\n`;
+					} else {
+						yamlString += `${space}  - ${item}\n`;
+					}
+				});
+			} else if (typeof value === 'object' && value !== null) {
+				yamlString += `${space}${key}:\n`;
+				yamlString += toYaml(value, indent + 2);
+			} else {
+				yamlString += `${space}${key}: ${value}\n`;
+			}
+		}
+		return yamlString;
+	};
+    
+    // A more reliable way to serialize to YAML-like string for Clash
+    const serializeClash = (config) => {
+        let out = "";
+        const simpleDump = (key, val) => out += `${key}: ${val}\n`;
+
+        simpleDump('port', config.port);
+        simpleDump('socks-port', config['socks-port']);
+        simpleDump('allow-lan', config['allow-lan']);
+        simpleDump('mode', config.mode);
+        simpleDump('log-level', config['log-level']);
+        simpleDump('external-controller', config['external-controller']);
+        
+        out += "proxies:\n";
+        for (const proxy of config.proxies) {
+            out += "  - {\n";
+            for (const [k, v] of Object.entries(proxy)) {
+                if (typeof v === 'object' && v !== null) {
+                    out += `      ${k}: { `;
+                    out += Object.entries(v).map(([sk, sv]) => `${sk}: ${JSON.stringify(sv)}`).join(', ');
+                    out += ` },\n`;
+                } else {
+                    out += `      ${k}: ${JSON.stringify(v)},\n`;
+                }
+            }
+            out += "    }\n";
         }
-        return await response.text();
-    } catch (error) {
-        console.error(`获取订阅内容时出错: ${error.message}`);
-        return null;
+        
+        out += "proxy-groups:\n";
+        for(const group of config['proxy-groups']) {
+             out += `  - name: ${group.name}\n`;
+             out += `    type: ${group.type}\n`;
+             out += `    proxies:\n`;
+             for(const proxyName of group.proxies){
+                 out += `      - ${proxyName}\n`;
+             }
+        }
+
+        out += "rules:\n";
+        for (const rule of config.rules) {
+            out += `  - ${rule}\n`;
+        }
+        
+        return out;
     }
+
+	return serializeClash(config);
+}
+
+
+/**
+ * Generates a Sing-box configuration file content.
+ * @param {Object[]} proxies - An array of proxy objects from Clash format.
+ * @returns {string} The JSON content for the Sing-box config.
+ */
+function generateSingboxConfig(proxies) {
+	const outbounds = proxies.map(clashProxy => {
+		// This is a simplified mapping. A real implementation needs more detail.
+		const singboxOutbound = {
+			type: clashProxy.type,
+			tag: clashProxy.name,
+			server: clashProxy.server,
+			server_port: clashProxy.port,
+			uuid: clashProxy.uuid,
+		};
+		if (clashProxy.type === 'vless') {
+			singboxOutbound.flow = clashProxy.flow;
+			if (clashProxy.tls) {
+				singboxOutbound.tls = {
+					enabled: true,
+					server_name: clashProxy.servername,
+					alpn: clashProxy.alpn,
+					reality: clashProxy['reality-opts'] ? {
+						enabled: true,
+						public_key: clashProxy['reality-opts']['public-key'],
+						short_id: clashProxy['reality-opts']['short-id'],
+					} : { enabled: false },
+					utls: {
+                        enabled: true,
+                        fingerprint: clashProxy['client-fingerprint'] || 'chrome',
+                    }
+				};
+			}
+			if(clashProxy.network === 'ws') {
+                singboxOutbound.transport = {
+                    type: 'ws',
+                    path: clashProxy['ws-opts'].path,
+                    headers: {
+                        Host: clashProxy['ws-opts'].headers.Host
+                    }
+                }
+            }
+		}
+		return singboxOutbound;
+	});
+
+    // Add a selector and DIRECT/REJECT outbounds
+    outbounds.push({
+        type: 'selector',
+        tag: 'PROXY',
+        outbounds: proxies.map(p => p.name)
+    }, {
+        type: 'direct',
+        tag: 'DIRECT'
+    }, {
+        type: 'block',
+        tag: 'REJECT'
+    });
+
+
+	const config = {
+		"log": { "level": "info" },
+		"inbounds": [
+            { "type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 1080 }
+        ],
+		"outbounds": outbounds,
+		"route": {
+			"rules": [
+                { "protocol": "dns", "outbound": "dns-out" },
+                { "domain_suffix": ["cn", "qq.com", "wechat.com"], "outbound": "DIRECT" },
+				{ "outbound": "PROXY" }
+			]
+		},
+        "experimental": { "clash_api": { "external_controller": "127.0.0.1:9090" } }
+	};
+	return JSON.stringify(config, null, 2);
 }
