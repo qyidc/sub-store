@@ -4,8 +4,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const convertBtn = document.getElementById('convert-btn');
     const clearBtn = document.getElementById('clear-btn');
     const resultArea = document.getElementById('result-area');
+    
+    const clashSubUrlEl = document.getElementById('clash-sub-url');
+    const copyClashSubBtn = document.getElementById('copy-clash-sub-btn');
+
     const clashDownloadBtn = document.getElementById('clash-download-btn');
     const singboxDownloadBtn = document.getElementById('singbox-download-btn');
+    
     const errorMessage = document.getElementById('error-message');
     const errorText = document.getElementById('error-text');
     const btnText = document.getElementById('btn-text');
@@ -13,7 +18,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Event Listeners ---
 
-    // Convert button click handler
     convertBtn.addEventListener('click', async () => {
         const inputData = subInput.value.trim();
         if (!inputData) {
@@ -21,7 +25,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // --- UI State: Loading ---
         setLoading(true);
         hideError();
         resultArea.classList.add('hidden');
@@ -29,57 +32,75 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch('/convert', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'text/plain;charset=UTF-8',
-                },
+                headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
                 body: inputData,
             });
 
+            const responseText = await response.text();
             if (!response.ok) {
-                const errorMsg = await response.text();
-                throw new Error(errorMsg || `服务器错误: ${response.status}`);
+                throw new Error(responseText || `服务器错误: ${response.status}`);
             }
 
-            const result = await response.json();
+            const result = JSON.parse(responseText);
 
             if (result.success) {
-                // --- UI State: Success ---
-                clashDownloadBtn.href = result.clashUrl;
-                singboxDownloadBtn.href = result.singboxUrl;
+                clashSubUrlEl.textContent = result.clashSubUrl;
+                clashDownloadBtn.href = result.clashDownloadUrl;
+                singboxDownloadBtn.href = result.singboxDownloadUrl;
                 resultArea.classList.remove('hidden');
             } else {
                  throw new Error(result.message || '转换失败，但未提供明确原因。');
             }
 
         } catch (error) {
-            // --- UI State: Error ---
             console.error('Fetch error:', error);
             showError(error.message);
         } finally {
-            // --- UI State: Reset ---
             setLoading(false);
         }
     });
 
-    // Clear button click handler
     clearBtn.addEventListener('click', () => {
         subInput.value = '';
         resultArea.classList.add('hidden');
         hideError();
     });
     
-    // Hide error when user starts typing again
     subInput.addEventListener('input', () => {
         hideError();
     });
 
+    copyClashSubBtn.addEventListener('click', () => {
+        const urlToCopy = clashSubUrlEl.textContent;
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(urlToCopy).then(() => {
+                const originalText = copyClashSubBtn.textContent;
+                copyClashSubBtn.textContent = '已复制!';
+                setTimeout(() => { copyClashSubBtn.textContent = originalText; }, 2000);
+            }).catch(err => {
+                showError('复制失败: ' + err);
+            });
+        } else {
+            // Fallback for older browsers
+            const textArea = document.createElement("textarea");
+            textArea.value = urlToCopy;
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                const originalText = copyClashSubBtn.textContent;
+                copyClashSubBtn.textContent = '已复制!';
+                setTimeout(() => { copyClashSubBtn.textContent = originalText; }, 2000);
+            } catch (err) {
+                showError('复制失败: ' + err);
+            }
+            document.body.removeChild(textArea);
+        }
+    });
 
     // --- Helper Functions ---
 
-    /**
-     * Toggles the loading state of the convert button.
-     * @param {boolean} isLoading - Whether to show the loading state.
-     */
     function setLoading(isLoading) {
         if (isLoading) {
             convertBtn.disabled = true;
@@ -94,18 +115,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    /**
-     * Displays an error message.
-     * @param {string} message - The error message to display.
-     */
     function showError(message) {
         errorText.textContent = message;
         errorMessage.classList.remove('hidden');
     }
 
-    /**
-     * Hides the error message box.
-     */
     function hideError() {
         errorMessage.classList.add('hidden');
     }
