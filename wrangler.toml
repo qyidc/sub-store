@@ -1,17 +1,15 @@
-name = "clash-sub-converter"
+# Cloudflare Worker 项目的配置文件
+name = "sub-store"
 main = "src/index.js"
-compatibility_date = "2025-06-05"
+compatibility_date = "2023-10-30"
 
-[observability.logs]
-enabled = true
+# 账户ID，您需要将其替换为您的Cloudflare账户ID
+# account_id = "YOUR_ACCOUNT_ID"
 
+# 绑定R2存储桶
+# 您需要在Cloudflare仪表盘预先创建一个R2存储桶，并将其名称填入下方
+# 这个存储桶将用于存放前端静态文件和生成的配置文件
 [[r2_buckets]]
-binding = "R2_SUBS_BUCKET"
-bucket_name = "my-clash-subs"
-
-[[r2_buckets]]
-binding = "R2_STATIC_ASSETS"
-bucket_name = "clash-converter-static"
-
-[[r2_buckets.upload]]
-source = "./public"
+binding = "SUB_STORE" # 在Worker代码中，将通过 env.SUB_STORE 来访问这个R2桶
+bucket_name = "sub-store-bucket" # 请替换为您实际创建的R2存储桶名称
+preview_bucket_name = "sub-store-bucket-preview" # 开发预览时使用的桶，可以和生产环境一样
