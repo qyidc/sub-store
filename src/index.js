@@ -62,14 +62,17 @@ export default {
 
 async function handleGenerateSubscription(request, env) {
     try {
-        const { links } = await request.json(); 
-        if (!links || !Array.isArray(links) || links.length === 0) {
-            return new Response(JSON.stringify({ error: '无效的输入', details: '需要提供节点链接数组' }), {
+        const { links = [], remoteSubs = [] } = await request.json(); 
+        if ((!links || !Array.isArray(links) || links.length === 0) && 
+            (!remoteSubs || !Array.isArray(remoteSubs) || remoteSubs.length === 0)) {
+            return new Response(JSON.stringify({ error: '无效的输入', details: '需要提供节点链接数组或远程订阅链接数组' }), {
                 status: 400, headers: { 'Content-Type': 'application/json;charset=UTF-8' },
             });
         }
 
         const proxies = [];
+
+        // 处理本地节点链接
         for (const rawLink of links) {
             if (!rawLink || typeof rawLink !== 'string' || !rawLink.trim()) continue;
             let link = rawLink.trim();
@@ -92,6 +95,35 @@ async function handleGenerateSubscription(request, env) {
 
             if (proxyConfig) proxies.push(proxyConfig);
             else console.warn(`无法解析或不支持的链接格式: ${link.substring(0, 50)}...`);
+        }
+
+        // 处理远程订阅链接
+        for (const subUrl of remoteSubs) {
+            if (!subUrl || typeof subUrl !== 'string' || !subUrl.trim()) continue;
+            try {
+                const response = await fetch(subUrl);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch subscription from ${subUrl}: ${response.statusText}`);
+                }
+                const subscriptionContent = await response.text();
+                const lines = subscriptionContent.split('\n');
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    if (!trimmedLine) continue;
+                    let proxyConfig = null;
+                    if (trimmedLine.startsWith('ss://')) proxyConfig = parseSS(trimmedLine);
+                    else if (trimmedLine.startsWith('vmess://')) proxyConfig = parseVmess(trimmedLine);
+                    else if (trimmedLine.startsWith('vless://')) proxyConfig = parseVless(trimmedLine);
+                    else if (trimmedLine.startsWith('trojan://')) proxyConfig = parseTrojan(trimmedLine);
+                    else if (trimmedLine.startsWith('tuic://')) proxyConfig = parseTuic(trimmedLine);
+                    else if (trimmedLine.startsWith('hysteria2://') || trimmedLine.startsWith('hy2://')) proxyConfig = parseHysteria2(trimmedLine);
+
+                    if (proxyConfig) proxies.push(proxyConfig);
+                    else console.warn(`无法解析或不支持的远程订阅链接格式: ${trimmedLine.substring(0, 50)}...`);
+                }
+            } catch (e) {
+                console.error(`Failed to process remote subscription ${subUrl}:`, e.message);
+            }
         }
 
         if (proxies.length === 0) {
