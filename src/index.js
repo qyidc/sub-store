@@ -99,14 +99,15 @@ async function handleGenerateSubscription(request, env) {
 
         // 处理远程订阅链接
       for (const subUrl of remoteSubs) {
-        if (!subUrl || typeof subUrl !== 'string' || !subUrl.trim()) continue;
-        try {
-            console.log(`开始获取远程订阅: ${subUrl}`);
-            // 添加请求头
-            const response = await fetch(subUrl, {
+    if (!subUrl || typeof subUrl !== 'string' || !subUrl.trim()) continue;
+    try {
+        console.log(`开始获取远程订阅: ${subUrl}`);
+        // 添加请求头和跨域模式
+        const response = await fetch(subUrl, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
-            }
+            },
+            mode: 'cors'
         });
         if (!response.ok) {
             console.error(`获取远程订阅失败: ${subUrl}, 状态码: ${response.status}, 状态文本: ${response.statusText}`);
