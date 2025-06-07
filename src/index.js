@@ -134,6 +134,16 @@ async function handleGenerateSubscription(request, env) {
             console.error(`处理远程订阅 ${subUrl} 失败:`, e.message);
         }
     }
+        if (proxies.length === 0) {
+        return new Response(JSON.stringify({ error: '没有可用的有效节点', details: '未能从输入中解析出任何有效节点配置' }), {
+            status: 400, headers: { 'Content-Type': 'application/json;charset=UTF-8' },
+        });
+        }
+
+    // 输出节点数量，确认是否有多个节点
+    console.log(`解析出的有效节点数量: ${proxies.length}`);
+
+    const fullYamlConfig = generateFullClashConfig(proxies, env);
 
         const fullYamlConfig = generateFullClashConfig(proxies, env);
         const subId = crypto.randomUUID();
