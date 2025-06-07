@@ -1,43 +1,19 @@
-/* 自定义字体，确保中文显示效果 */
+/* Custom styles can go here if needed */
+/* For example, to add a subtle background pattern */
 body {
-    font-family: 'Inter', 'Helvetica Neue', 'Helvetica', 'Arial', 'sans-serif', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    transition: background-color 0.3s ease;
 }
-/* 简单的加载动画 */
-.loader {
-    border: 4px solid #f3f3f3; /* Light grey */
-    border-top: 4px solid #3498db; /* Blue */
-    border-radius: 50%;
-    width: 30px;
-    height: 30px;
-    animation: spin 1s linear infinite;
-    margin: 10px auto;
+
+/* Custom transition for result area */
+#result-area {
+    transition: opacity 0.5s ease-in-out, transform 0.3s ease-in-out;
 }
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+
+/* Ensure the loader icon is centered inside the button */
+#convert-btn.is-loading #btn-text {
+    display: none;
 }
-/* 消息提示框样式 */
-.toast {
-    position: fixed;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 10px 20px;
-    border-radius: 8px;
-    color: white;
-    z-index: 1000;
-    opacity: 0;
-    transition: opacity 0.3s ease-in-out;
-    pointer-events: none;
-    max-width: 90%;
-    word-break: break-all;
-}
-.toast.show {
-    opacity: 1;
-}
-.toast.success {
-    background-color: #28a745; /* Green */
-}
-.toast.error {
-    background-color: #dc3545; /* Red */
+
+#convert-btn.is-loading #loader {
+    display: block;
 }
