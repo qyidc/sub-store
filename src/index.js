@@ -101,28 +101,17 @@ async function handleGenerateSubscription(request, env) {
         for (const subUrl of remoteSubs) {
             if (!subUrl || typeof subUrl !== 'string' || !subUrl.trim()) continue;
             try {
+                console.log(`开始获取远程订阅: ${subUrl}`);
                 const response = await fetch(subUrl);
                 if (!response.ok) {
+                    console.error(`获取远程订阅失败: ${subUrl}, 状态码: ${response.status}, 状态文本: ${response.statusText}`);
                     throw new Error(`Failed to fetch subscription from ${subUrl}: ${response.statusText}`);
                 }
+                console.log(`成功获取远程订阅: ${subUrl}`);
                 const subscriptionContent = await response.text();
-                const lines = subscriptionContent.split('\n');
-                for (const line of lines) {
-                    const trimmedLine = line.trim();
-                    if (!trimmedLine) continue;
-                    let proxyConfig = null;
-                    if (trimmedLine.startsWith('ss://')) proxyConfig = parseSS(trimmedLine);
-                    else if (trimmedLine.startsWith('vmess://')) proxyConfig = parseVmess(trimmedLine);
-                    else if (trimmedLine.startsWith('vless://')) proxyConfig = parseVless(trimmedLine);
-                    else if (trimmedLine.startsWith('trojan://')) proxyConfig = parseTrojan(trimmedLine);
-                    else if (trimmedLine.startsWith('tuic://')) proxyConfig = parseTuic(trimmedLine);
-                    else if (trimmedLine.startsWith('hysteria2://') || trimmedLine.startsWith('hy2://')) proxyConfig = parseHysteria2(trimmedLine);
-
-                    if (proxyConfig) proxies.push(proxyConfig);
-                    else console.warn(`无法解析或不支持的远程订阅链接格式: ${trimmedLine.substring(0, 50)}...`);
-                }
+                // ... existing code ...
             } catch (e) {
-                console.error(`Failed to process remote subscription ${subUrl}:`, e.message);
+                console.error(`处理远程订阅 ${subUrl} 失败:`, e.message);
             }
         }
 
