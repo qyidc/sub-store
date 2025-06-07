@@ -1,0 +1,11 @@
+# --- 最简测试配置 ---
+name = "clash-sub-converter" # 请确保这是您的 Worker 名称
+main = "src/index.js" # 请确保这是您的入口文件路径
+compatibility_date = "2025-06-05"
+
+[[r2_buckets]]
+  binding = "R2_STATIC_ASSETS"
+  bucket_name = "clash-converter-static" # 请确保这是您的 R2 存储桶名称
+
+[[r2_buckets.upload]]
+  source = "./public"
