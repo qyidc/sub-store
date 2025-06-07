@@ -94,9 +94,7 @@ async function handleGenerateSubscription(request, env) {
             else if (link.startsWith('hysteria2://') || link.startsWith('hy2://')) proxyConfig = parseHysteria2(link);
 
             if (proxyConfig) proxies.push(proxyConfig);
-            else {
-                console.warn(`无法解析或不支持的链接格式: ${link}`); // 输出完整链接
-            }
+            else console.warn(`无法解析或不支持的链接格式: ${link.substring(0, 50)}...`);
         }
 
         // 处理远程订阅链接
@@ -127,9 +125,7 @@ async function handleGenerateSubscription(request, env) {
                         else if (line.startsWith('hysteria2://') || line.startsWith('hy2://')) proxyConfig = parseHysteria2(line);
     
                         if (proxyConfig) proxies.push(proxyConfig);
-                        else {
-                            console.warn(`无法解析或不支持的链接格式: ${line}`); // 输出完整链接
-                        }
+                        else console.warn(`无法解析或不支持的链接格式: ${line.substring(0, 50)}...`);
                     }
                 } catch (e) {
                     console.error(`解析远程订阅 ${subUrl} 内容失败:`, e.message);
@@ -223,7 +219,6 @@ async function handleServeSubscription(url, env) {
     return new Response(object.body, { headers });
 }
 
-// --- Base64 Helper ---
 function tryDecodeBase64(str) {
     try {
         if (!str || typeof str !== 'string') return str;
@@ -243,7 +238,6 @@ function isLikelyProtocolLink(str) {
     return protocols.some(p => str.startsWith(p));
 }
 
-// --- Protocol Parsers ---
 function parseSS(link) {
     try {
         const url = new URL(link);
@@ -400,7 +394,37 @@ function parseHysteria2(link) {
     } catch (e) { console.error(`Hysteria2解析失败: ${link.substring(0,50)} - ${e.message}`); return null; }
 }
 
-// --- YAML Generation ---
+function escapeYamlString(str) {
+    if (typeof str !== 'string') return String(str); 
+    return `"${str.replace(/"/g, '\\"')}"`;
+}
+
+function objectToYamlParts(obj, baseIndent) {
+    const parts = [];
+    for (const key in obj) {
+        if (obj.hasOwnProperty(key)) {
+            const value = obj[key];
+            let valueStr;
+            if (typeof value === 'string') {
+                valueStr = escapeYamlString(value); 
+            } else if (typeof value === 'boolean' || typeof value === 'number') {
+                valueStr = value.toString();
+            } else if (Array.isArray(value)) {
+                if (value.length === 0)  valueStr = '[]';
+                else valueStr = `\n${value.map(item => `${baseIndent}  - ${escapeYamlString(item)}`).join('\n')}`;
+            } else if (typeof value === 'object' && value !== null) {
+                const nestedParts = objectToYamlParts(value, baseIndent + '  ');
+                valueStr = nestedParts.length === 0 ? '{}' : `\n${nestedParts.join('\n')}`;
+            } else if (value === null) {
+                valueStr = 'null';
+            } else continue; 
+            parts.push(`${baseIndent}${key}: ${valueStr}`);
+        }
+    }
+
+    return parts;
+}
+
 function generateFullClashConfig(proxies, env) {
     const proxyNames = proxies.map((p, i) => p.name || `${p.type || 'Proxy'}-${i}` ).filter((value, index, self) => self.indexOf(value) === index);
     
@@ -431,6 +455,7 @@ function generateFullClashConfig(proxies, env) {
                 parts.push(`${baseIndent}${key}: ${valueStr}`);
             }
         }
+
         return parts;
     }
 
@@ -499,4 +524,18 @@ dns:
 proxies:
 ${proxiesYaml}
 ${groupsAndRules}`;
+}
+
+// 新增 fetchSubscriptionContent 函数
+async function fetchSubscriptionContent(subUrl) {
+    try {
+        const response = await fetch(subUrl);
+        if (!response.ok) {
+            throw new Error(`获取订阅内容失败，状态码: ${response.status}`);
+        }
+        return await response.text();
+    } catch (error) {
+        console.error(`获取订阅内容时出错: ${error.message}`);
+        return null;
+    }
 }
