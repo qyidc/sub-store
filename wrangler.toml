@@ -3,12 +3,12 @@ main = "src/index.js"
 compatibility_date = "2025-06-05"
 
 [[r2_buckets]]
-binding = "R2_STATIC_ASSETS"
-bucket_name = "clash-converter-static"
-
-[[r2_buckets]]
 binding = "R2_SUBS_BUCKET"
 bucket_name = "my-clash-subs"
+
+[[r2_buckets]]
+binding = "R2_STATIC_ASSETS"
+bucket_name = "clash-converter-static"
 
 [[r2_buckets.upload]]
 source = "./public"
