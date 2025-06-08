@@ -112,9 +112,9 @@ router.post(/^\/convert$/, async ({ request, env }) => {
         const expiration = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
 
 		await env.SUB_STORE.put(clashSubKey, clashConfig, {
-			httpMetadata: { contentType: 'application/x-yaml; charset=utf-8' },
-            expires: expiration,
-		});
+            httpMetadata: { contentType: 'application/x-yaml; charset=utf-8' },
+            customMetadata: { expires: expiration.toISOString() }  // 存储为ISO字符串
+        });
         await env.SUB_STORE.put(clashDownloadKey, clashConfig, {
 			httpMetadata: { contentType: 'application/x-yaml; charset=utf-8' },
             expires: expiration,
@@ -171,22 +171,17 @@ router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request }) => {
         return new Response('Subscription not found', { status: 404 });
     }
 
-    // 必须将body转换为新的ReadableStream
-    const body = new ReadableStream({
-        start(controller) {
-            controller.enqueue(object.body);
-            controller.close();
-        }
-    });
-
+    // 修复expires未定义问题
+    const expires = object.customMetadata?.expires || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    
     const headers = new Headers({
         'Content-Type': 'application/x-yaml; charset=utf-8',
-        'subscription-userinfo': `upload=0; download=0; total=107374182400; expire=${Math.floor(object.expires.getTime() / 1000)}`,
+        'subscription-userinfo': `upload=0; download=0; total=107374182400; expire=${Math.floor(expires.getTime() / 1000)}`,
         'profile-update-interval': '24',
         'profile-web-page-url': new URL(request.url).origin
     });
 
-    return new Response(body, { headers });
+    return new Response(object.body, { headers });
 });
 
 /**
