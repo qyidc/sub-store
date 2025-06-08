@@ -167,28 +167,27 @@ router.get(/^\/download\/(?<path>.+)$/, async ({ params, env }) => {
  */
 router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request }) => {
     const object = await env.SUB_STORE.get(params.path);
-
     if (object === null) {
         return new Response('Subscription not found', { status: 404 });
     }
 
-    // Read the body content ONCE into a string variable to avoid "body already read" errors.
-    const configText = await object.text();
+    // 必须将body转换为新的ReadableStream
+    const body = new ReadableStream({
+        start(controller) {
+            controller.enqueue(object.body);
+            controller.close();
+        }
+    });
 
-    const headers = new Headers();
-    object.writeHttpMetadata(headers); // This reads metadata, which is fine.
-    headers.set('etag', object.httpEtag);
-    
-    // Add subscription-info header for Clash clients, using the string variable.
-    const proxyCount = (configText.match(/name:/g) || []).length;
-    headers.set('subscription-userinfo', `upload=0; download=0; total=107374182400; expire=${Math.floor(object.expires.getTime() / 1000)}`);
-    headers.set('profile-update-interval', '24'); // 24 hours
-    headers.set('profile-web-page-url', new URL(request.url).origin);
+    const headers = new Headers({
+        'Content-Type': 'application/x-yaml; charset=utf-8',
+        'subscription-userinfo': `upload=0; download=0; total=107374182400; expire=${Math.floor(object.expires.getTime() / 1000)}`,
+        'profile-update-interval': '24',
+        'profile-web-page-url': new URL(request.url).origin
+    });
 
-    // Return a new response using the string variable as the body.
-    return new Response(configText, { headers });
+    return new Response(body, { headers });
 });
-
 
 /**
  * Serves static assets from the R2 bucket.
@@ -204,6 +203,12 @@ async function serveStaticAsset({ request, env }) {
 	const headers = new Headers();
 	object.writeHttpMetadata(headers);
 	headers.set('etag', object.httpEtag);
+
+    headers.set('Cache-Control', 'public, max-age=3600');
+    if (key.endsWith('.html')) {
+        headers.set('Content-Type', 'text/html; charset=utf-8');
+        headers.set('Cache-Control', 'no-cache');
+    }
 
 	if (key.endsWith('.html')) headers.set('Content-Type', 'text/html; charset=utf-8');
 	else if (key.endsWith('.css')) headers.set('Content-Type', 'text/css; charset=utf-8');
