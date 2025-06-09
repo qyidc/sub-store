@@ -1,19 +1,15 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers! (完美运行版)
+ * 欢迎来到 Cloudflare Workers! (带密码保护和自定义有效期功能版)
  * =================================================================================
  *
  * 这是您订阅转换器应用的核心后端逻辑。
  * 它由 Cloudflare Workers 驱动，运行在全球边缘网络，具有高性能和低延迟的特点。
  *
- * 主要功能：
- * 1.  【静态网站托管】: 从 Cloudflare R2 存储桶中提供前端页面 (index.html, script.js 等)。
- * 2.  【API 接口】: 提供 `/convert` 接口，接收前端发来的转换请求。
- * 3.  【协议解析】: 解析多种主流的代理协议分享链接 (VLESS, VMess, Trojan, TUIC, Hysteria2)。
- * 4.  【订阅源处理】: 支持处理单个分享链接、多个链接，以及远程订阅地址(URL)。
- * 5.  【配置生成】: 生成 Clash 和 Sing-box 客户端兼容的标准化配置文件。
- * 6.  【文件存储】: 将生成的配置文件临时存入 R2 存储桶，并设置7天自动过期 (TTL)。
- * 7.  【链接提供】: 返回可供下载的配置文件链接，以及可以直接在客户端使用的 Clash 订阅链接。
+ * 【新增功能】:
+ * 1. 【密码保护】: 用户可以为生成的订阅/下载链接设置密码。
+ * 2. 【自定义有效期】: 用户可以选择链接的有效期限 (1天, 7天, 30天)。
+ * 3. 【访问验证】: 访问受保护的链接时，必须在URL中提供正确的token参数。
  *
  * @see 官方文档: https://developers.cloudflare.com/workers/
  */
@@ -53,12 +49,14 @@ const router = Router();
 // =================================================================================
 router.post(/^\/convert$/, async ({ request, env }) => {
 	try {
-		const body = await request.text();
-		if (!body) {
-			return new Response('Request body is empty.', { status: 400 });
+		// 【升级】: 解析JSON请求体，以接收更多参数
+		const { subscription_data, password, expirationDays } = await request.json();
+
+		if (!subscription_data) {
+			return new Response('Request body is empty or invalid.', { status: 400 });
 		}
 
-		const lines = body.split(/[\r\n]+/).filter(line => line.trim() !== '');
+		const lines = subscription_data.split(/[\r\n]+/).filter(line => line.trim() !== '');
 		let allProxies = [];
 
 		for (const line of lines) {
@@ -102,28 +100,33 @@ router.post(/^\/convert$/, async ({ request, env }) => {
         const clashSubR2Key = `subs/${clashSubId}`;
 		const clashDownloadKey = `configs/clash-${fileId}.yaml`;
 		const singboxKey = `configs/singbox-${fileId}.json`;
-        const expiration = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        
+        // 【升级】: 根据用户选择计算过期时间
+        const days = parseInt(expirationDays) || 7;
+        const expiration = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
-		await env.SUB_STORE.put(clashSubR2Key, clashConfig, {
-			httpMetadata: { contentType: 'application/x-yaml; charset=utf-8' },
+        // 【升级】: 如果用户设置了密码，则将其添加到文件的自定义元数据中
+        const r2Options = {
+            httpMetadata: { contentType: 'application/x-yaml; charset=utf-8' },
             expires: expiration,
-		});
-        await env.SUB_STORE.put(clashDownloadKey, clashConfig, {
-			httpMetadata: { contentType: 'application/x-yaml; charset=utf-8' },
-            expires: expiration,
-		});
-		await env.SUB_STORE.put(singboxKey, singboxConfig, {
-			httpMetadata: { contentType: 'application/json; charset=utf-8' },
-            expires: expiration,
-		});
+        };
+        if (password) {
+            r2Options.customMetadata = { password: password };
+        }
+
+		await env.SUB_STORE.put(clashSubR2Key, clashConfig, r2Options);
+        await env.SUB_STORE.put(clashDownloadKey, clashConfig, r2Options);
+		await env.SUB_STORE.put(singboxKey, singboxConfig, { ...r2Options, httpMetadata: { contentType: 'application/json; charset=utf-8' } });
 
         const urlBase = new URL(request.url).origin;
 
 		return new Response(JSON.stringify({
 			success: true,
-            clashSubUrl: `${urlBase}/sub/${clashSubId}`, 
-			clashDownloadUrl: `/download/${clashDownloadKey}`,
-			singboxDownloadUrl: `/download/${singboxKey}`,
+            // 【重要】: 现在返回的是不带密码的干净文件名（我们称之为分享ID）
+            // 用户需要使用这个ID和密码来提取链接
+            clashId: clashSubId,
+            singboxId: singboxKey.replace('configs/', ''), // 也返回干净的文件名
+            passwordProtected: !!password, // 告知前端此链接是否受密码保护
 		}), {
 			headers: { 'Content-Type': 'application/json' },
 		});
@@ -135,13 +138,104 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 });
 
 // =================================================================================
-// 下载路由: /download/:path (提供文件下载)
+// 提取路由: /extract (新增)
 // =================================================================================
-router.get(/^\/download\/(?<path>.+)$/, async ({ params, env }) => {
-	const object = await env.SUB_STORE.get(params.path);
-	if (object === null) {
-		return new Response('Object Not Found', { status: 404 });
-	}
+/**
+ * @description 【新增】用于验证密码并返回真实链接的API
+ */
+router.post(/^\/extract$/, async ({ request, env }) => {
+    try {
+        const { fileId, password } = await request.json();
+        if (!fileId) {
+            return new Response('File ID is required.', { status: 400 });
+        }
+        
+        // 根据文件ID的类型，判断是clash还是singbox，并构造R2的key
+        let r2Key;
+        if (fileId.startsWith('clash-')) {
+            r2Key = `subs/${fileId}`;
+        } else if (fileId.startsWith('singbox-')) {
+            r2Key = `configs/${fileId}`;
+        } else {
+            return new Response('Invalid File ID format.', { status: 400 });
+        }
+
+        // 使用 head() 方法只获取元数据，不下载整个文件，效率更高
+        const object = await env.SUB_STORE.head(r2Key);
+
+        if (object === null) {
+            return new Response('File not found.', { status: 404 });
+        }
+
+        const storedPassword = object.customMetadata?.password;
+
+        // 验证逻辑
+        if (storedPassword && storedPassword !== password) {
+            return new Response('Invalid password.', { status: 403 });
+        }
+        
+        // 验证通过，构造真实的访问链接
+        const urlBase = new URL(request.url).origin;
+        let finalUrl;
+        if (fileId.startsWith('clash-')) {
+             finalUrl = `${urlBase}/sub/${fileId}`;
+        } else {
+             finalUrl = `${urlBase}/download/configs/${fileId}`;
+        }
+        
+        // 如果有密码，将密码作为token附加到URL上
+        if (storedPassword) {
+            finalUrl += `?token=${encodeURIComponent(storedPassword)}`;
+        }
+        
+        return new Response(JSON.stringify({ success: true, url: finalUrl }), {
+            headers: { 'Content-Type': 'application/json' },
+        });
+
+    } catch (e) {
+        console.error('Extraction error:', e);
+        return new Response(`An error occurred: ${e.message}`, { status: 500 });
+    }
+});
+
+
+// =================================================================================
+// 访问控制的下载和订阅路由 (已升级)
+// =================================================================================
+/**
+ * @description 通用的受保护资源访问函数
+ * @param {string} r2Key - R2中的文件完整路径
+ * @param {URL} url - 当前请求的URL对象，用于获取token
+ * @param {object} env - Worker环境变量
+ * @returns {Response}
+ */
+async function getProtectedResource(r2Key, url, env) {
+    const object = await env.SUB_STORE.get(r2Key);
+    if (object === null) {
+        return new Response('Object Not Found.', { status: 404 });
+    }
+
+    const storedPassword = object.customMetadata?.password;
+    
+    // 如果文件有密码保护
+    if (storedPassword) {
+        const token = url.searchParams.get('token');
+        if (token !== storedPassword) {
+            return new Response('Access denied. Invalid or missing token.', { status: 403 });
+        }
+    }
+    
+    return object; // 返回获取到的R2Object
+}
+
+
+router.get(/^\/download\/(?<path>.+)$/, async ({ params, env, url }) => {
+    const object = await getProtectedResource(params.path, url, env);
+    // 检查返回的是否是一个Response对象（表示出错或拒绝访问）
+    if (object instanceof Response) {
+        return object;
+    }
+    
 	const headers = new Headers();
 	object.writeHttpMetadata(headers);
 	headers.set('etag', object.httpEtag);
@@ -151,53 +245,36 @@ router.get(/^\/download\/(?<path>.+)$/, async ({ params, env }) => {
 	return new Response(object.body, { headers });
 });
 
-// =================================================================================
-// 订阅路由: /sub/:path (为Clash等客户端提供订阅)
-// =================================================================================
-router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request }) => {
-    try {
-        const r2Key = `subs/${params.path}`;
-        const object = await env.SUB_STORE.get(r2Key);
 
-        if (object === null) {
-            return new Response('Subscription not found in R2.', { status: 404 });
-        }
-
-        const configText = await object.text();
-        const headers = new Headers();
-        
-        // 【终极修复】: 手动构建响应头，不再使用 object.writeHttpMetadata()
-        // 这样可以完全控制响应行为，避免从R2继承不期望的头信息。
-        
-        // 【核心】: 强制将 Content-Type 设置为 text/plain。
-        // 这会告诉浏览器将内容作为纯文本显示，而不是下载。
-        // Clash客户端主要关心内容，对此不敏感，因此能实现兼容。
-        headers.set('Content-Type', 'text/plain; charset=utf-8');
-        headers.set('etag', object.httpEtag);
-        
-        const proxyCount = (configText.match(/name:/g) || []).length;
-        const expireTimestamp = object.expires 
-            ? Math.floor(object.expires.getTime() / 1000) 
-            : Math.floor((Date.now() + 7 * 24 * 60 * 60 * 1000) / 1000);
-
-        headers.set('subscription-userinfo', `upload=0; download=0; total=107374182400; expire=${expireTimestamp}`);
-        headers.set('profile-update-interval', '24');
-        headers.set('profile-web-page-url', new URL(request.url).origin);
-
-        return new Response(configText, { headers });
-
-    } catch (e) {
-        const errorBody = `Worker script crashed.\n\nError Message:\n${e.message}\n\nStack Trace:\n${e.stack}`;
-        return new Response(errorBody, {
-            status: 500,
-            headers: { 'Content-Type': 'text/plain' }
-        });
+router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request, url }) => {
+    const r2Key = `subs/${params.path}`;
+    const object = await getProtectedResource(r2Key, url, env);
+    // 检查返回的是否是一个Response对象（表示出错或拒绝访问）
+    if (object instanceof Response) {
+        return object;
     }
+
+    const configText = await object.text();
+    const headers = new Headers();
+    
+    headers.set('Content-Type', 'text/plain; charset=utf-8');
+    headers.set('etag', object.httpEtag);
+    
+    const proxyCount = (configText.match(/name:/g) || []).length;
+    const expireTimestamp = object.expires 
+        ? Math.floor(object.expires.getTime() / 1000) 
+        : Math.floor((Date.now() + 7 * 24 * 60 * 60 * 1000) / 1000);
+
+    headers.set('subscription-userinfo', `upload=0; download=0; total=107374182400; expire=${expireTimestamp}`);
+    headers.set('profile-update-interval', '24');
+    headers.set('profile-web-page-url', new URL(request.url).origin);
+
+    return new Response(configText, { headers });
 });
 
 
 // =================================================================================
-// 静态资源服务 (Serving Static Assets)
+// 静态资源服务 (Serving Static Assets) - 无需修改
 // =================================================================================
 async function serveStaticAsset({ request, env }) {
 	const url = new URL(request.url);
@@ -224,7 +301,7 @@ export default {
 };
 
 // #################################################################################
-//                          协议解析与配置生成模块
+//                          协议解析与配置生成模块 - 无需修改
 // #################################################################################
 async function parseShareLink(link) {if (!link) return [];try {let decodedLink = link;if (!link.includes('://') && (link.length % 4 === 0) && /^[a-zA-Z0-9+/]*={0,2}$/.test(link)) {try { decodedLink = atob(link); } catch (e) { /* ignore */ }}if (decodedLink.startsWith('vless://')) return [parseVless(decodedLink)];if (decodedLink.startsWith('vmess://')) return [parseVmess(decodedLink)];if (decodedLink.startsWith('trojan://')) return [parseTrojan(decodedLink)];if (decodedLink.startsWith('tuic://')) return [parseTuic(decodedLink)];if (decodedLink.startsWith('hysteria2://')) return [parseHysteria2(decodedLink)];} catch (error) {console.warn(`Skipping invalid link: ${link.substring(0, 40)}...`, error.message);return [];}return [];}
 function parseVless(link) {const url = new URL(link);const params = url.searchParams;const proxy = {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'vless',server: url.hostname,port: parseInt(url.port, 10),uuid: url.username,network: params.get('type') || 'tcp',tls: params.get('security') === 'tls' || params.get('security') === 'reality',udp: true,flow: params.get('flow') || '','client-fingerprint': params.get('fp') || 'chrome',};if (proxy.tls) {proxy.servername = params.get('sni') || url.hostname;proxy.alpn = params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"];if (params.get('security') === 'reality') {proxy['reality-opts'] = { 'public-key': params.get('pbk'), 'short-id': params.get('sid') };}}if (proxy.network === 'ws') proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || url.hostname } };if (proxy.network === 'grpc') proxy['grpc-opts'] = { 'grpc-service-name': params.get('serviceName') || '' };return proxy;}
