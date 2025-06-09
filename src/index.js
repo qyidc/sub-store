@@ -1,6 +1,6 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers! (带诊断标记的最终版)
+ * 欢迎来到 Cloudflare Workers! (终极稳定版)
  * =================================================================================
  *
  * 这是您订阅转换器应用的核心后端逻辑。
@@ -214,43 +214,52 @@ router.get(/^\/download\/(?<path>.+)$/, async ({ params, env }) => {
  * 这是专门为 Clash 等客户端设计的订阅接口，它返回的是纯文本内容（信件）。
  */
 router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request }) => {
-    // 根据URL路径 `.../sub/clash-xxx.yaml` 中的 `clash-xxx.yaml` 部分，
-    // 重新构造出它在R2中实际的存储路径 `subs/clash-xxx.yaml`。
-    const r2Key = `subs/${params.path}`;
-    const object = await env.SUB_STORE.get(r2Key);
+    try {
+        // 根据URL路径 `.../sub/clash-xxx.yaml` 中的 `clash-xxx.yaml` 部分，
+        // 重新构造出它在R2中实际的存储路径 `subs/clash-xxx.yaml`。
+        const r2Key = `subs/${params.path}`;
+        const object = await env.SUB_STORE.get(r2Key);
 
-    if (object === null) {
-        return new Response('Subscription not found', { status: 404 });
+        if (object === null) {
+            return new Response('Subscription not found in R2.', { status: 404 });
+        }
+
+        // 【解决1101错误的核心】
+        // 对应“一次性电影票”的比喻：先把票上的信息（文件内容）抄到手上。
+        // `object.text()` 会消耗掉文件的数据流，将其完整读入一个字符串变量中。
+        const configText = await object.text();
+
+        const headers = new Headers();
+        // object.writeHttpMetadata() 只是读取元数据，不会消耗数据流，是安全的。
+        object.writeHttpMetadata(headers);
+        headers.set('etag', object.httpEtag);
+        
+        // 为 Clash 客户端添加特定的订阅信息头，告知流量和过期时间等信息。
+        const proxyCount = (configText.match(/name:/g) || []).length;
+
+        // 【健壮性修复】: 检查 object.expires 是否存在。如果文件在R2中没有设置过期时间
+        // (可能是旧代码生成的)，则为订阅头动态计算一个默认的过期时间（从现在起7天后）。
+        // 这可以防止因 object.expires 为 undefined 而导致的 .getTime() 崩溃。
+        const expireTimestamp = object.expires 
+            ? Math.floor(object.expires.getTime() / 1000) 
+            : Math.floor((Date.now() + 7 * 24 * 60 * 60 * 1000) / 1000);
+
+        headers.set('subscription-userinfo', `upload=0; download=0; total=107374182400; expire=${expireTimestamp}`);
+        headers.set('profile-update-interval', '24');
+        headers.set('profile-web-page-url', new URL(request.url).origin);
+
+        // 最后，返回一个全新的响应，它的内容是我们早已抄在手上的 `configText` 字符串。
+        return new Response(configText, { headers });
+
+    } catch (e) {
+        // 如果 try 代码块中的任何地方发生崩溃，都会被这里捕获。
+        // 我们不再返回通用的1101错误，而是返回一个包含详细错误信息的500响应。
+        const errorBody = `Worker script crashed.\n\nError Message:\n${e.message}\n\nStack Trace:\n${e.stack}`;
+        return new Response(errorBody, {
+            status: 500,
+            headers: { 'Content-Type': 'text/plain' }
+        });
     }
-
-    // 【解决1101错误的核心】
-    // 对应“一次性电影票”的比喻：先把票上的信息（文件内容）抄到手上。
-    // `object.text()` 会消耗掉文件的数据流，将其完整读入一个字符串变量中。
-    const configText = await object.text();
-
-    const headers = new Headers();
-    
-    // 【诊断标记】为响应添加一个自定义头部，用于判断部署的代码版本。
-    headers.set('X-Worker-Version', '2025-06-09-FINAL-DEBUG');
-    
-    // object.writeHttpMetadata() 只是读取元数据，不会消耗数据流，是安全的。
-    object.writeHttpMetadata(headers);
-    headers.set('etag', object.httpEtag);
-    
-    // 【关键】这里绝对不能设置 `Content-Disposition: attachment` 头。
-    // 我们要让Clash直接“读信”，而不是“收包裹”。
-    
-    // 为 Clash 客户端添加特定的订阅信息头，告知流量和过期时间等信息。
-    // 我们在这里使用已经抄在手上的 `configText` 来统计节点，而不是去读第二次文件。
-    const proxyCount = (configText.match(/name:/g) || []).length;
-    headers.set('subscription-userinfo', `upload=0; download=0; total=107374182400; expire=${Math.floor(object.expires.getTime() / 1000)}`);
-    headers.set('profile-update-interval', '24'); // 建议客户端24小时更新一次订阅
-    headers.set('profile-web-page-url', new URL(request.url).origin);
-
-    // 【解决1101错误的核心】
-    // 最后，返回一个全新的响应，它的内容是我们早已抄在手上的 `configText` 字符串。
-    // 这样就完全避免了重复读取原始数据流的问题。
-    return new Response(configText, { headers });
 });
 
 
@@ -292,14 +301,359 @@ export default {
 };
 
 // #################################################################################
-//                          协议解析与配置生成模块 (无需修改)
+//                          协议解析与配置生成模块 (已展开并添加注解)
 // #################################################################################
-async function parseShareLink(link) {if (!link) return [];try {let decodedLink = link;if (!link.includes('://') && (link.length % 4 === 0) && /^[a-zA-Z0-9+/]*={0,2}$/.test(link)) {try { decodedLink = atob(link); } catch (e) { /* ignore */ }}if (decodedLink.startsWith('vless://')) return [parseVless(decodedLink)];if (decodedLink.startsWith('vmess://')) return [parseVmess(decodedLink)];if (decodedLink.startsWith('trojan://')) return [parseTrojan(decodedLink)];if (decodedLink.startsWith('tuic://')) return [parseTuic(decodedLink)];if (decodedLink.startsWith('hysteria2://')) return [parseHysteria2(decodedLink)];} catch (error) {console.warn(`Skipping invalid link: ${link.substring(0, 40)}...`, error.message);return [];}return [];}
-function parseVless(link) {const url = new URL(link);const params = url.searchParams;const proxy = {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'vless',server: url.hostname,port: parseInt(url.port, 10),uuid: url.username,network: params.get('type') || 'tcp',tls: params.get('security') === 'tls' || params.get('security') === 'reality',udp: true,flow: params.get('flow') || '','client-fingerprint': params.get('fp') || 'chrome',};if (proxy.tls) {proxy.servername = params.get('sni') || url.hostname;proxy.alpn = params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"];if (params.get('security') === 'reality') {proxy['reality-opts'] = { 'public-key': params.get('pbk'), 'short-id': params.get('sid') };}}if (proxy.network === 'ws') proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || url.hostname } };if (proxy.network === 'grpc') proxy['grpc-opts'] = { 'grpc-service-name': params.get('serviceName') || '' };return proxy;}
-function parseVmess(link) {const jsonStr = atob(link.substring('vmess://'.length));const config = JSON.parse(jsonStr);return {name: config.ps || config.add, type: 'vmess', server: config.add, port: parseInt(config.port, 10),uuid: config.id, alterId: config.aid, cipher: config.scy || 'auto',tls: config.tls === 'tls', network: config.net || 'tcp', udp: true,servername: config.sni || undefined,'ws-opts': config.net === 'ws' ? { path: config.path || '/', headers: { Host: config.host || config.add } } : undefined,'h2-opts': config.net === 'h2' ? { path: config.path || '/', host: [config.host || config.add] } : undefined,'grpc-opts': config.net === 'grpc' ? { 'grpc-service-name': config.path || ''} : undefined,};}
-function parseTrojan(link) {const url = new URL(link);const params = url.searchParams;return {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'trojan', server: url.hostname, port: parseInt(url.port, 10),password: url.username, udp: true, sni: params.get('sni') || url.hostname,servername: params.get('sni') || url.hostname,alpn: params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"],};}
-function parseTuic(link) {const url = new URL(link);const params = url.searchParams;const [uuid, password] = url.username.split(':');return {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'tuic', server: url.hostname, port: parseInt(url.port, 10),uuid: uuid, password: password,servername: params.get('sni') || url.hostname,udp: true,'congestion-controller': params.get('congestion_control') || 'bbr','udp-relay-mode': params.get('udp_relay_mode') || 'native',alpn: params.get('alpn') ? params.get('alpn').split(',') : ["h3"],'disable-sni': params.get('disable_sni') === 'true',};}
-function parseHysteria2(link) {const url = new URL(link);const params = url.searchParams;return {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'hysteria2', server: url.hostname, port: parseInt(url.port, 10),password: url.username,servername: params.get('sni') || url.hostname,udp: true,'skip-cert-verify': params.get('insecure') === '1' || params.get('skip_cert_verify') === 'true',obfs: params.get('obfs'),'obfs-password': params.get('obfs-password'),};}
-function generateClashConfig(proxies) {const proxyNames = proxies.map(p => p.name);const config = {'port': 7890, 'socks-port': 7891, 'allow-lan': false,'mode': 'rule', 'log-level': 'info', 'external-controller': '127.0.0.1:9090','proxies': proxies,'proxy-groups': [{'name': 'PROXY', 'type': 'select', 'proxies': ['DIRECT', 'REJECT', ...proxyNames],}],'rules': ['DOMAIN-SUFFIX,google.com,PROXY', 'DOMAIN-SUFFIX,github.com,PROXY','DOMAIN-SUFFIX,youtube.com,PROXY', 'DOMAIN-SUFFIX,telegram.org,PROXY','GEOIP,CN,DIRECT', 'MATCH,PROXY',],};const serializeClash = (config) => {let out = "";const simpleDump = (key, val) => { if(val !== undefined) out += `${key}: ${val}\n`};simpleDump('port', config.port);simpleDump('socks-port', config['socks-port']);simpleDump('allow-lan', config['allow-lan']);simpleDump('mode', config.mode);simpleDump('log-level', config['log-level']);simpleDump('external-controller', config['external-controller']);out += "proxies:\n";for (const proxy of config.proxies) {out += "  - {\n";for (const [k, v] of Object.entries(proxy)) {if(v === undefined) continue;if (typeof v === 'object' && v !== null && !Array.isArray(v)) {out += `      ${k}: { `;out += Object.entries(v).map(([sk, sv]) => `${sk}: ${JSON.stringify(sv)}`).join(', ');out += ` },\n`;} else if (k === 'alpn' && Array.isArray(v)) {out += `      ${k}: [${v.map(i => JSON.stringify(i)).join(', ')}],\n`;}else {out += `      ${k}: ${JSON.stringify(v)},\n`;}}out = out.slice(0, -2) + "\n    }\n";}out += "proxy-groups:\n";for(const group of config['proxy-groups']) {out += `  - name: ${group.name}\n`;out += `    type: ${group.type}\n`;out += `    proxies:\n`;for(const proxyName of group.proxies){out += `      - ${proxyName}\n`;}}out += "rules:\n";for (const rule of config.rules) {out += `  - ${rule}\n`;}return out;}
-	return serializeClash(config);}
-function generateSingboxConfig(proxies) {const outbounds = proxies.map(clashProxy => {const {name, type, server, port, password, uuid, alterId, cipher,network, tls, udp, flow, 'client-fingerprint': fingerprint,servername, alpn, 'reality-opts': realityOpts,'ws-opts': wsOpts, 'grpc-opts': grpcOpts,'congestion-controller': congestion, 'udp-relay-mode': udpRelayMode,'skip-cert-verify': skipCertVerify, obfs, 'obfs-password': obfsPassword} = clashProxy;const singboxOutbound = {tag: name,type: type,server: server,server_port: parseInt(port, 10),};if (uuid) singboxOutbound.uuid = uuid;if (password) singboxOutbound.password = password;if (type === 'vless') {if (flow) singboxOutbound.flow = flow;}if (type === 'vmess') {singboxOutbound.alter_id = alterId;singboxOutbound.security = cipher || 'auto';}if (tls) {singboxOutbound.tls = {enabled: true,server_name: servername || server,alpn: alpn,insecure: skipCertVerify || false,};if (fingerprint) {singboxOutbound.tls.utls = { enabled: true, fingerprint: fingerprint };}if (realityOpts) {singboxOutbound.tls.reality = {enabled: true,public_key: realityOpts['public-key'],short_id: realityOpts['short-id'],};}}if(type === 'hysteria2') {if (obfs && obfsPassword) {singboxOutbound.obfs = { type: 'salamander', password: obfsPassword };}singboxOutbound.up_mbps = 20; singboxOutbound.down_mbps = 100;}if(type === 'tuic') {singboxOutbound.congestion_control = congestion;singboxOutbound.udp_relay_mode = udpRelayMode;singboxOutbound.version = 'v5';}if (network && network !== 'tcp') {singboxOutbound.transport = { type: network };if (network === 'ws' && wsOpts) {singboxOutbound.transport.path = wsOpts.path;if (wsOpts.headers && wsOpts.headers.Host) {singboxOutbound.transport.headers = { Host: wsOpts.headers.Host };}}if (network === 'grpc' && grpcOpts) {singboxOutbound.transport.service_name = grpcOpts['grpc-service-name'];}}return singboxOutbound;});outbounds.push({ type: 'selector', tag: 'PROXY', outbounds: proxies.map(p => p.name).concat(['DIRECT', 'REJECT']) },{ type: 'direct', tag: 'DIRECT' },{ type: 'block', tag: 'REJECT' },{ type: 'dns', tag: 'dns-out' });const config = {log: { level: "info", timestamp: true },inbounds: [{ type: "mixed", tag: "mixed-in", listen: "127.0.0.1", listen_port: 2080 }],outbounds: outbounds,route: {rules: [{ protocol: "dns", outbound: "dns-out" },{ geoip: ["cn"], outbound: "DIRECT" },{ domain_suffix: ["cn", "qq.com", "wechat.com"], outbound: "DIRECT" },{ outbound: "PROXY" }],auto_detect_interface: true},experimental: { clash_api: { external_controller: "127.0.0.1:9090", secret: "" } }};return JSON.stringify(config, null, 2);}
+/**
+ * @description 解析单条分享链接。这是一个分发函数，根据链接的前缀调用相应的具体解析函数。
+ * @param {string} link - 单条分享链接或订阅内容中的一行。
+ * @returns {Array<Object>} 返回一个包含解析出的代理节点对象的数组（通常只有一个元素）。
+ */
+async function parseShareLink(link) {
+	if (!link) return [];
+	try {
+        // 简单的 Base64 预解码检查：如果链接不含 "://" 且看起来像 Base64，则先尝试解码。
+        let decodedLink = link;
+        if (!link.includes('://') && (link.length % 4 === 0) && /^[a-zA-Z0-9+/]*={0,2}$/.test(link)) {
+             try { decodedLink = atob(link); } catch (e) { /* 忽略解码失败 */ }
+        }
+        
+		if (decodedLink.startsWith('vless://')) return [parseVless(decodedLink)];
+		if (decodedLink.startsWith('vmess://')) return [parseVmess(decodedLink)];
+		if (decodedLink.startsWith('trojan://')) return [parseTrojan(decodedLink)];
+        if (decodedLink.startsWith('tuic://')) return [parseTuic(decodedLink)];
+        if (decodedLink.startsWith('hysteria2://')) return [parseHysteria2(decodedLink)];
+	} catch (error) {
+		// 如果解析过程中出现任何错误，则在后台打印警告并跳过此链接。
+		console.warn(`Skipping invalid link: ${link.substring(0, 40)}...`, error.message);
+		return [];
+	}
+	return [];
+}
+
+/**
+ * @description 解析 Vless 链接
+ * @param {string} link - vless://... 格式的链接
+ * @returns {Object} Clash 格式的代理对象
+ */
+function parseVless(link) {
+	const url = new URL(link);
+	const params = url.searchParams;
+	const proxy = {
+		name: decodeURIComponent(url.hash).substring(1) || url.hostname,
+		type: 'vless',
+		server: url.hostname,
+		port: parseInt(url.port, 10),
+		uuid: url.username,
+		network: params.get('type') || 'tcp',
+		tls: params.get('security') === 'tls' || params.get('security') === 'reality',
+		udp: true,
+		flow: params.get('flow') || '',
+		'client-fingerprint': params.get('fp') || 'chrome',
+	};
+
+	if (proxy.tls) {
+		proxy.servername = params.get('sni') || url.hostname;
+		proxy.alpn = params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"];
+		if (params.get('security') === 'reality') {
+			proxy['reality-opts'] = { 'public-key': params.get('pbk'), 'short-id': params.get('sid') };
+		}
+	}
+	if (proxy.network === 'ws') proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || url.hostname } };
+    if (proxy.network === 'grpc') proxy['grpc-opts'] = { 'grpc-service-name': params.get('serviceName') || '' };
+	return proxy;
+}
+
+/**
+ * @description 解析 Vmess 链接 (base64 编码的 JSON)
+ * @param {string} link - vmess://... 格式的链接
+ * @returns {Object} Clash 格式的代理对象
+ */
+function parseVmess(link) {
+    const jsonStr = atob(link.substring('vmess://'.length));
+    const config = JSON.parse(jsonStr);
+    return {
+        name: config.ps || config.add,
+        type: 'vmess',
+        server: config.add,
+        port: parseInt(config.port, 10),
+        uuid: config.id,
+        alterId: config.aid,
+        cipher: config.scy || 'auto',
+        tls: config.tls === 'tls',
+        network: config.net || 'tcp',
+        udp: true,
+        servername: config.sni || undefined,
+        'ws-opts': config.net === 'ws' ? { path: config.path || '/', headers: { Host: config.host || config.add } } : undefined,
+        'h2-opts': config.net === 'h2' ? { path: config.path || '/', host: [config.host || config.add] } : undefined,
+        'grpc-opts': config.net === 'grpc' ? { 'grpc-service-name': config.path || ''} : undefined,
+    };
+}
+
+/**
+ * @description 解析 Trojan 链接
+ * @param {string} link - trojan://... 格式的链接
+ * @returns {Object} Clash 格式的代理对象
+ */
+function parseTrojan(link) {
+	const url = new URL(link);
+	const params = url.searchParams;
+    return {
+        name: decodeURIComponent(url.hash).substring(1) || url.hostname,
+        type: 'trojan',
+        server: url.hostname,
+        port: parseInt(url.port, 10),
+        password: url.username,
+        udp: true,
+        sni: params.get('sni') || url.hostname,
+        servername: params.get('sni') || url.hostname,
+        alpn: params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"],
+    };
+}
+
+/**
+ * @description 解析 TUIC v5 链接
+ * @param {string} link - tuic://... 格式的链接
+ * @returns {Object} Clash 格式的代理对象
+ */
+function parseTuic(link) {
+    const url = new URL(link);
+    const params = url.searchParams;
+    const [uuid, password] = url.username.split(':');
+    return {
+        name: decodeURIComponent(url.hash).substring(1) || url.hostname,
+        type: 'tuic',
+        server: url.hostname,
+        port: parseInt(url.port, 10),
+        uuid: uuid,
+        password: password,
+        servername: params.get('sni') || url.hostname,
+        udp: true,
+        'congestion-controller': params.get('congestion_control') || 'bbr',
+        'udp-relay-mode': params.get('udp_relay_mode') || 'native',
+        alpn: params.get('alpn') ? params.get('alpn').split(',') : ["h3"],
+        'disable-sni': params.get('disable_sni') === 'true',
+    };
+}
+
+/**
+ * @description 解析 Hysteria2 链接
+ * @param {string} link - hysteria2://... 格式的链接
+ * @returns {Object} Clash 格式的代理对象
+ */
+function parseHysteria2(link) {
+    const url = new URL(link);
+    const params = url.searchParams;
+    return {
+        name: decodeURIComponent(url.hash).substring(1) || url.hostname,
+        type: 'hysteria2',
+        server: url.hostname,
+        port: parseInt(url.port, 10),
+        password: url.username,
+        servername: params.get('sni') || url.hostname,
+        udp: true,
+        'skip-cert-verify': params.get('insecure') === '1' || params.get('skip_cert_verify') === 'true',
+        obfs: params.get('obfs'),
+        'obfs-password': params.get('obfs-password'),
+    };
+}
+
+/**
+ * @description 根据解析出的代理节点列表，生成 Clash 兼容的配置文件内容 (YAML格式)。
+ * @param {Array<Object>} proxies - 包含所有代理节点对象的数组。
+ * @returns {string} - YAML 格式的 Clash 配置字符串。
+ */
+function generateClashConfig(proxies) {
+	const proxyNames = proxies.map(p => p.name);
+	const config = {
+		'port': 7890,
+		'socks-port': 7891,
+		'allow-lan': false,
+		'mode': 'rule',
+		'log-level': 'info',
+		'external-controller': '127.0.0.1:9090',
+		'proxies': proxies,
+		'proxy-groups': [{
+			'name': 'PROXY',
+			'type': 'select',
+			'proxies': ['DIRECT', 'REJECT', ...proxyNames],
+		}],
+		'rules': [
+            'DOMAIN-SUFFIX,google.com,PROXY',
+            'DOMAIN-SUFFIX,github.com,PROXY',
+            'DOMAIN-SUFFIX,youtube.com,PROXY',
+            'DOMAIN-SUFFIX,telegram.org,PROXY',
+            'GEOIP,CN,DIRECT',
+            'MATCH,PROXY',
+        ],
+	};
+    
+    // 自定义一个简单的序列化函数，将 JS 对象转换为 YAML 字符串。
+    // 这是因为 Worker 环境中没有完整的 YAML 库，这样做更可靠。
+    const serializeClash = (config) => {
+        let out = "";
+        const simpleDump = (key, val) => { if(val !== undefined) out += `${key}: ${val}\n`};
+
+        simpleDump('port', config.port);
+        simpleDump('socks-port', config['socks-port']);
+        simpleDump('allow-lan', config['allow-lan']);
+        simpleDump('mode', config.mode);
+        simpleDump('log-level', config['log-level']);
+        simpleDump('external-controller', config['external-controller']);
+        
+        out += "proxies:\n";
+        for (const proxy of config.proxies) {
+            out += "  - {\n";
+            for (const [k, v] of Object.entries(proxy)) {
+                if(v === undefined) continue;
+                if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+                    out += `      ${k}: { `;
+                    out += Object.entries(v).map(([sk, sv]) => `${sk}: ${JSON.stringify(sv)}`).join(', ');
+                    out += ` },\n`;
+                } else if (k === 'alpn' && Array.isArray(v)) {
+                     out += `      ${k}: [${v.map(i => JSON.stringify(i)).join(', ')}],\n`;
+                }
+                else {
+                    out += `      ${k}: ${JSON.stringify(v)},\n`;
+                }
+            }
+            out = out.slice(0, -2) + "\n    }\n";
+        }
+        
+        out += "proxy-groups:\n";
+        for(const group of config['proxy-groups']) {
+             out += `  - name: ${group.name}\n`;
+             out += `    type: ${group.type}\n`;
+             out += `    proxies:\n`;
+             for(const proxyName of group.proxies){
+                 out += `      - ${proxyName}\n`;
+             }
+        }
+
+        out += "rules:\n";
+        for (const rule of config.rules) {
+            out += `  - ${rule}\n`;
+        }
+        
+        return out;
+    };
+
+	return serializeClash(config);
+}
+
+
+/**
+ * @description 根据解析出的代理节点列表，生成 Sing-box 兼容的配置文件内容 (JSON格式)。
+ * @param {Array<Object>} proxies - 包含所有代理节点对象的数组。
+ * @returns {string} - JSON 格式的 Sing-box 配置字符串。
+ */
+function generateSingboxConfig(proxies) {
+    const outbounds = proxies.map(clashProxy => {
+        // 解构所有可能的 Clash 风格的代理属性
+        const {
+            name, type, server, port, password, uuid, alterId, cipher,
+            network, tls, udp, flow, 'client-fingerprint': fingerprint,
+            servername, alpn, 'reality-opts': realityOpts,
+            'ws-opts': wsOpts, 'grpc-opts': grpcOpts,
+            'congestion-controller': congestion, 'udp-relay-mode': udpRelayMode,
+            'skip-cert-verify': skipCertVerify, obfs, 'obfs-password': obfsPassword
+        } = clashProxy;
+
+        // 构建 Sing-box 出站对象的基础结构
+        const singboxOutbound = {
+            tag: name,
+            type: type,
+            server: server,
+            server_port: parseInt(port, 10),
+        };
+
+        // 根据不同协议添加特定属性
+        if (uuid) singboxOutbound.uuid = uuid;
+        if (password) singboxOutbound.password = password;
+
+        if (type === 'vless') {
+            if (flow) singboxOutbound.flow = flow;
+        }
+
+        if (type === 'vmess') {
+            singboxOutbound.alter_id = alterId;
+            singboxOutbound.security = cipher || 'auto';
+        }
+
+        // 处理 TLS, Reality, 和 UTLS (client-fingerprint) 设置
+        if (tls) {
+            singboxOutbound.tls = {
+                enabled: true,
+                server_name: servername || server,
+                alpn: alpn,
+                insecure: skipCertVerify || false,
+            };
+            if (fingerprint) {
+                singboxOutbound.tls.utls = { enabled: true, fingerprint: fingerprint };
+            }
+            if (realityOpts) {
+                singboxOutbound.tls.reality = {
+                    enabled: true,
+                    public_key: realityOpts['public-key'],
+                    short_id: realityOpts['short-id'],
+                };
+            }
+        }
+        
+        if(type === 'hysteria2') {
+            if (obfs && obfsPassword) {
+                singboxOutbound.obfs = { type: 'salamander', password: obfsPassword };
+            }
+            singboxOutbound.up_mbps = 20; // 为 sing-box 设置默认上下行速度
+            singboxOutbound.down_mbps = 100;
+        }
+        
+        if(type === 'tuic') {
+            singboxOutbound.congestion_control = congestion;
+            singboxOutbound.udp_relay_mode = udpRelayMode;
+            singboxOutbound.version = 'v5'; // sing-box 使用 TUIC v5 协议
+        }
+
+        // 处理传输层设置 (WebSocket, gRPC 等)
+        if (network && network !== 'tcp') {
+            singboxOutbound.transport = { type: network };
+            if (network === 'ws' && wsOpts) {
+                singboxOutbound.transport.path = wsOpts.path;
+                if (wsOpts.headers && wsOpts.headers.Host) {
+                    singboxOutbound.transport.headers = { Host: wsOpts.headers.Host };
+                }
+            }
+            if (network === 'grpc' && grpcOpts) {
+                singboxOutbound.transport.service_name = grpcOpts['grpc-service-name'];
+            }
+        }
+
+        return singboxOutbound;
+    });
+
+    // 添加选择器、直连、阻止等必要的出站规则
+    outbounds.push(
+        { type: 'selector', tag: 'PROXY', outbounds: proxies.map(p => p.name).concat(['DIRECT', 'REJECT']) },
+        { type: 'direct', tag: 'DIRECT' },
+        { type: 'block', tag: 'REJECT' },
+        { type: 'dns', tag: 'dns-out' }
+    );
+
+    // 组合成完整的 Sing-box 配置对象
+	const config = {
+		log: { level: "info", timestamp: true },
+		inbounds: [{ type: "mixed", tag: "mixed-in", listen: "127.0.0.1", listen_port: 2080 }],
+		outbounds: outbounds,
+		route: {
+			rules: [
+                { protocol: "dns", outbound: "dns-out" },
+                { geoip: ["cn"], outbound: "DIRECT" },
+                { domain_suffix: ["cn", "qq.com", "wechat.com"], outbound: "DIRECT" },
+				{ outbound: "PROXY" }
+			],
+            auto_detect_interface: true
+		},
+        experimental: { clash_api: { external_controller: "127.0.0.1:9090", secret: "" } }
+	};
+    // 将 JS 对象格式化为带缩进的 JSON 字符串
+	return JSON.stringify(config, null, 2);
+}
