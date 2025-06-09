@@ -1,6 +1,6 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers!
+ * 欢迎来到 Cloudflare Workers! (带诊断标记的最终版)
  * =================================================================================
  *
  * 这是您订阅转换器应用的核心后端逻辑。
@@ -195,7 +195,7 @@ router.get(/^\/download\/(?<path>.+)$/, async ({ params, env }) => {
 		return new Response('Object Not Found', { status: 404 });
 	}
 
-	const headers = new new Headers();
+	const headers = new Headers();
 	object.writeHttpMetadata(headers); // 将存储时设置的元数据(如ContentType)写入响应头
 	headers.set('etag', object.httpEtag);
 	
@@ -229,6 +229,10 @@ router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request }) => {
     const configText = await object.text();
 
     const headers = new Headers();
+    
+    // 【诊断标记】为响应添加一个自定义头部，用于判断部署的代码版本。
+    headers.set('X-Worker-Version', '2025-06-09-FINAL-DEBUG');
+    
     // object.writeHttpMetadata() 只是读取元数据，不会消耗数据流，是安全的。
     object.writeHttpMetadata(headers);
     headers.set('etag', object.httpEtag);
