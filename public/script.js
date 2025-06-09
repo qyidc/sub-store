@@ -2,7 +2,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Part 1: Conversion Elements ---
     const subInput = document.getElementById('sub-input');
     const expirationSelect = document.getElementById('expiration-select');
-    const passwordInput = document.getElementById('password-input');
     const convertBtn = document.getElementById('convert-btn');
     const convertResultArea = document.getElementById('convert-result-area');
     const extractionCodeDisplay = document.getElementById('extraction-code-display');
@@ -40,8 +39,6 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const requestBody = {
                 subscription_data: inputData,
-                // .value will be an empty string if nothing is entered, which is what we want
-                password: passwordInput.value.trim(),
                 expirationDays: expirationSelect.value,
             };
 
@@ -51,9 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify(requestBody),
             });
             
-            // It's crucial to check response.ok *before* trying to parse JSON
             if (!response.ok) {
-                // Try to get more specific error from body, fallback to status text
                 const errText = await response.text();
                 throw new Error(errText || `服务器错误: ${response.status}`);
             }
@@ -64,7 +59,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 extractionCodeDisplay.textContent = result.extractionCode;
                 convertResultArea.classList.remove('hidden');
             } else {
-                 // This case might be rare if backend always uses HTTP status for errors
                  throw new Error(result.message || '转换失败，但未提供明确原因。');
             }
         } catch (error) {
@@ -124,7 +118,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (target.classList.contains('copy-btn')) {
             const elementToCopy = document.querySelector(target.dataset.clipboardTarget);
             if (elementToCopy && (elementToCopy.textContent || elementToCopy.href)) {
-                // Prefer href for <a> tags, otherwise textContent
                 const textToCopy = elementToCopy.href || elementToCopy.textContent;
                 navigator.clipboard.writeText(textToCopy).then(() => {
                     const originalText = target.textContent;
@@ -159,13 +152,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let errorTimeout;
     function showError(message) {
         clearTimeout(errorTimeout);
-        // Sanitize or ensure the message is a simple string before displaying
         errorText.textContent = String(message).replace(/<[^>]*>?/gm, '');
         errorMessage.classList.remove('hidden', 'opacity-0');
         errorMessage.classList.add('opacity-100');
         errorTimeout = setTimeout(() => {
             errorMessage.classList.add('opacity-0');
-            // Wait for transition to finish before hiding
             setTimeout(() => errorMessage.classList.add('hidden'), 300);
         }, 5000);
     }

@@ -1,12 +1,12 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers! (密码即ID的最终版)
+ * 欢迎来到 Cloudflare Workers! (UUID提取码的最终版)
  * =================================================================================
  *
  * 【核心升级】:
- * 1. 【密码即ID】: 用户提供的密码或系统自动生成的UUID将作为本次转换的唯一“提取码”。
- * 2. 【简化提取】: 用户只需提供此“提取码”，即可获取最终的订阅和下载链接。
- * 3. 【API重构】: 后端 /convert 和 /extract 接口已重构，以支持新的工作流。
+ * 1. 【简化流程】: 移除了自定义密码功能，始终使用系统生成的UUID作为唯一的“提取码”。
+ * 2. 【杜绝冲突】: 由于UUID的唯一性，自然地解决了自定义提取码可能产生的冲突问题。
+ * 3. 【API简化】: 后端 /convert 接口不再处理密码字段，逻辑更清晰。
  */
 
 // =================================================================================
@@ -44,7 +44,8 @@ const router = Router();
 // =================================================================================
 router.post(/^\/convert$/, async ({ request, env }) => {
 	try {
-		const { subscription_data, password, expirationDays } = await request.json();
+		// 【简化】: 不再接收 password 字段
+		const { subscription_data, expirationDays } = await request.json();
 
 		if (!subscription_data) {
 			return new Response('Request body is empty or invalid.', { status: 400 });
@@ -89,10 +90,9 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 		const clashConfig = generateClashConfig(allProxies);
 		const singboxConfig = generateSingboxConfig(allProxies);
         
-        // 【升级】: 提取码(extractionCode)要么是用户输入的密码，要么是新生成的UUID
-        const extractionCode = password || crypto.randomUUID();
+        // 【简化】: 提取码(extractionCode)始终由 crypto.randomUUID() 生成
+        const extractionCode = crypto.randomUUID();
 
-        // 使用提取码来构造确定性的文件名
         const clashFileId = `clash-${extractionCode}.yaml`;
         const singboxFileId = `singbox-${extractionCode}.json`;
 
@@ -112,7 +112,6 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 
 		return new Response(JSON.stringify({
 			success: true,
-            // 【重要】: 只返回唯一的提取码给前端
             extractionCode: extractionCode,
 		}), {
 			headers: { 'Content-Type': 'application/json' },
@@ -125,7 +124,7 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 });
 
 // =================================================================================
-// 提取路由: /extract (已升级)
+// 提取路由: /extract (逻辑不变，但更清晰)
 // =================================================================================
 router.post(/^\/extract$/, async ({ request, env }) => {
     try {
@@ -134,20 +133,17 @@ router.post(/^\/extract$/, async ({ request, env }) => {
             return new Response('Extraction code is required.', { status: 400 });
         }
         
-        // 根据提取码构造文件名
         const clashFileId = `clash-${extractionCode}.yaml`;
         const singboxFileId = `singbox-${extractionCode}.json`;
         
         const clashR2Key = `subs/${clashFileId}`;
         const singboxR2Key = `configs/${singboxFileId}`;
 
-        // 使用 head() 检查Clash文件是否存在作为有效性判断
         const object = await env.SUB_STORE.head(clashR2Key);
         if (object === null) {
-            return new Response('Invalid extraction code or link has expired.', { status: 404 });
+            return new Response('提取码无效或链接已过期。', { status: 404 });
         }
         
-        // 验证通过，构造真实的访问链接
         const urlBase = new URL(request.url).origin;
         const clashUrl = `${urlBase}/sub/${clashFileId}`;
         const singboxUrl = `${urlBase}/download/${singboxR2Key}`;
@@ -168,7 +164,7 @@ router.post(/^\/extract$/, async ({ request, env }) => {
 
 
 // =================================================================================
-// 下载和订阅路由 - 无需密码检查，因为URL本身是秘密
+// 下载和订阅路由 - 无需修改
 // =================================================================================
 router.get(/^\/download\/(?<path>.+)$/, async ({ params, env }) => {
 	const object = await env.SUB_STORE.get(params.path);
