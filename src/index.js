@@ -185,6 +185,9 @@ router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request }) => {
     headers.set('profile-update-interval', '24'); // 24 hours
     headers.set('profile-web-page-url', new URL(request.url).origin);
 
+    // Set the Content-Type header to application/x-yaml.确保不会触发下载
+    headers.set('Content-Type', 'application/x-yaml; charset=utf-8');
+
     // Return a new response using the string variable as the body.
     return new Response(configText, { headers });
 });
