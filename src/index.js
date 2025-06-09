@@ -112,9 +112,9 @@ router.post(/^\/convert$/, async ({ request, env }) => {
         const expiration = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
 
 		await env.SUB_STORE.put(clashSubKey, clashConfig, {
-            httpMetadata: { contentType: 'application/x-yaml; charset=utf-8' },
-            customMetadata: { expires: expiration.toISOString() }  // 存储为ISO字符串
-        });
+			httpMetadata: { contentType: 'application/x-yaml; charset=utf-8' },
+            expires: expiration,
+		});
         await env.SUB_STORE.put(clashDownloadKey, clashConfig, {
 			httpMetadata: { contentType: 'application/x-yaml; charset=utf-8' },
             expires: expiration,
@@ -167,22 +167,28 @@ router.get(/^\/download\/(?<path>.+)$/, async ({ params, env }) => {
  */
 router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request }) => {
     const object = await env.SUB_STORE.get(params.path);
+
     if (object === null) {
         return new Response('Subscription not found', { status: 404 });
     }
 
-    // 修复expires未定义问题
-    const expires = object.customMetadata?.expires || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    
-    const headers = new Headers({
-        'Content-Type': 'application/x-yaml; charset=utf-8',
-        'subscription-userinfo': `upload=0; download=0; total=107374182400; expire=${Math.floor(expires.getTime() / 1000)}`,
-        'profile-update-interval': '24',
-        'profile-web-page-url': new URL(request.url).origin
-    });
+    // Read the body content ONCE into a string variable to avoid "body already read" errors.
+    const configText = await object.text();
 
-    return new Response(object.body, { headers });
+    const headers = new Headers();
+    object.writeHttpMetadata(headers); // This reads metadata, which is fine.
+    headers.set('etag', object.httpEtag);
+    
+    // Add subscription-info header for Clash clients, using the string variable.
+    const proxyCount = (configText.match(/name:/g) || []).length;
+    headers.set('subscription-userinfo', `upload=0; download=0; total=107374182400; expire=${Math.floor(object.expires.getTime() / 1000)}`);
+    headers.set('profile-update-interval', '24'); // 24 hours
+    headers.set('profile-web-page-url', new URL(request.url).origin);
+
+    // Return a new response using the string variable as the body.
+    return new Response(configText, { headers });
 });
+
 
 /**
  * Serves static assets from the R2 bucket.
@@ -198,12 +204,6 @@ async function serveStaticAsset({ request, env }) {
 	const headers = new Headers();
 	object.writeHttpMetadata(headers);
 	headers.set('etag', object.httpEtag);
-
-    headers.set('Cache-Control', 'public, max-age=3600');
-    if (key.endsWith('.html')) {
-        headers.set('Content-Type', 'text/html; charset=utf-8');
-        headers.set('Cache-Control', 'no-cache');
-    }
 
 	if (key.endsWith('.html')) headers.set('Content-Type', 'text/html; charset=utf-8');
 	else if (key.endsWith('.css')) headers.set('Content-Type', 'text/css; charset=utf-8');
