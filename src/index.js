@@ -1,17 +1,12 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers! (带密码保护和自定义有效期功能版)
+ * 欢迎来到 Cloudflare Workers! (密码即ID的最终版)
  * =================================================================================
  *
- * 这是您订阅转换器应用的核心后端逻辑。
- * 它由 Cloudflare Workers 驱动，运行在全球边缘网络，具有高性能和低延迟的特点。
- *
- * 【新增功能】:
- * 1. 【密码保护】: 用户可以为生成的订阅/下载链接设置密码。
- * 2. 【自定义有效期】: 用户可以选择链接的有效期限 (1天, 7天, 30天)。
- * 3. 【访问验证】: 访问受保护的链接时，必须在URL中提供正确的token参数。
- *
- * @see 官方文档: https://developers.cloudflare.com/workers/
+ * 【核心升级】:
+ * 1. 【密码即ID】: 用户提供的密码或系统自动生成的UUID将作为本次转换的唯一“提取码”。
+ * 2. 【简化提取】: 用户只需提供此“提取码”，即可获取最终的订阅和下载链接。
+ * 3. 【API重构】: 后端 /convert 和 /extract 接口已重构，以支持新的工作流。
  */
 
 // =================================================================================
@@ -49,7 +44,6 @@ const router = Router();
 // =================================================================================
 router.post(/^\/convert$/, async ({ request, env }) => {
 	try {
-		// 【升级】: 解析JSON请求体，以接收更多参数
 		const { subscription_data, password, expirationDays } = await request.json();
 
 		if (!subscription_data) {
@@ -94,39 +88,32 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 
 		const clashConfig = generateClashConfig(allProxies);
 		const singboxConfig = generateSingboxConfig(allProxies);
-
-		const fileId = crypto.randomUUID();
-        const clashSubId = `clash-${fileId}.yaml`;
-        const clashSubR2Key = `subs/${clashSubId}`;
-		const clashDownloadKey = `configs/clash-${fileId}.yaml`;
-		const singboxKey = `configs/singbox-${fileId}.json`;
         
-        // 【升级】: 根据用户选择计算过期时间
+        // 【升级】: 提取码(extractionCode)要么是用户输入的密码，要么是新生成的UUID
+        const extractionCode = password || crypto.randomUUID();
+
+        // 使用提取码来构造确定性的文件名
+        const clashFileId = `clash-${extractionCode}.yaml`;
+        const singboxFileId = `singbox-${extractionCode}.json`;
+
+        const clashSubR2Key = `subs/${clashFileId}`;
+		const singboxR2Key = `configs/${singboxFileId}`;
+        
         const days = parseInt(expirationDays) || 7;
         const expiration = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
-        // 【升级】: 如果用户设置了密码，则将其添加到文件的自定义元数据中
         const r2Options = {
-            httpMetadata: { contentType: 'application/x-yaml; charset=utf-8' },
+            httpMetadata: {},
             expires: expiration,
         };
-        if (password) {
-            r2Options.customMetadata = { password: password };
-        }
 
-		await env.SUB_STORE.put(clashSubR2Key, clashConfig, r2Options);
-        await env.SUB_STORE.put(clashDownloadKey, clashConfig, r2Options);
-		await env.SUB_STORE.put(singboxKey, singboxConfig, { ...r2Options, httpMetadata: { contentType: 'application/json; charset=utf-8' } });
-
-        const urlBase = new URL(request.url).origin;
+		await env.SUB_STORE.put(clashSubR2Key, clashConfig, { ...r2Options, httpMetadata: { contentType: 'application/x-yaml; charset=utf-8' }});
+        await env.SUB_STORE.put(singboxR2Key, singboxConfig, { ...r2Options, httpMetadata: { contentType: 'application/json; charset=utf-8' } });
 
 		return new Response(JSON.stringify({
 			success: true,
-            // 【重要】: 现在返回的是不带密码的干净文件名（我们称之为分享ID）
-            // 用户需要使用这个ID和密码来提取链接
-            clashId: clashSubId,
-            singboxId: singboxKey.replace('configs/', ''), // 也返回干净的文件名
-            passwordProtected: !!password, // 告知前端此链接是否受密码保护
+            // 【重要】: 只返回唯一的提取码给前端
+            extractionCode: extractionCode,
 		}), {
 			headers: { 'Content-Type': 'application/json' },
 		});
@@ -138,57 +125,38 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 });
 
 // =================================================================================
-// 提取路由: /extract (新增)
+// 提取路由: /extract (已升级)
 // =================================================================================
-/**
- * @description 【新增】用于验证密码并返回真实链接的API
- */
 router.post(/^\/extract$/, async ({ request, env }) => {
     try {
-        const { fileId, password } = await request.json();
-        if (!fileId) {
-            return new Response('File ID is required.', { status: 400 });
+        const { extractionCode } = await request.json();
+        if (!extractionCode) {
+            return new Response('Extraction code is required.', { status: 400 });
         }
         
-        // 根据文件ID的类型，判断是clash还是singbox，并构造R2的key
-        let r2Key;
-        if (fileId.startsWith('clash-')) {
-            r2Key = `subs/${fileId}`;
-        } else if (fileId.startsWith('singbox-')) {
-            r2Key = `configs/${fileId}`;
-        } else {
-            return new Response('Invalid File ID format.', { status: 400 });
-        }
+        // 根据提取码构造文件名
+        const clashFileId = `clash-${extractionCode}.yaml`;
+        const singboxFileId = `singbox-${extractionCode}.json`;
+        
+        const clashR2Key = `subs/${clashFileId}`;
+        const singboxR2Key = `configs/${singboxFileId}`;
 
-        // 使用 head() 方法只获取元数据，不下载整个文件，效率更高
-        const object = await env.SUB_STORE.head(r2Key);
-
+        // 使用 head() 检查Clash文件是否存在作为有效性判断
+        const object = await env.SUB_STORE.head(clashR2Key);
         if (object === null) {
-            return new Response('File not found.', { status: 404 });
-        }
-
-        const storedPassword = object.customMetadata?.password;
-
-        // 验证逻辑
-        if (storedPassword && storedPassword !== password) {
-            return new Response('Invalid password.', { status: 403 });
+            return new Response('Invalid extraction code or link has expired.', { status: 404 });
         }
         
         // 验证通过，构造真实的访问链接
         const urlBase = new URL(request.url).origin;
-        let finalUrl;
-        if (fileId.startsWith('clash-')) {
-             finalUrl = `${urlBase}/sub/${fileId}`;
-        } else {
-             finalUrl = `${urlBase}/download/configs/${fileId}`;
-        }
+        const clashUrl = `${urlBase}/sub/${clashFileId}`;
+        const singboxUrl = `${urlBase}/download/${singboxR2Key}`;
         
-        // 如果有密码，将密码作为token附加到URL上
-        if (storedPassword) {
-            finalUrl += `?token=${encodeURIComponent(storedPassword)}`;
-        }
-        
-        return new Response(JSON.stringify({ success: true, url: finalUrl }), {
+        return new Response(JSON.stringify({ 
+            success: true, 
+            clashUrl: clashUrl,
+            singboxUrl: singboxUrl,
+        }), {
             headers: { 'Content-Type': 'application/json' },
         });
 
@@ -200,75 +168,39 @@ router.post(/^\/extract$/, async ({ request, env }) => {
 
 
 // =================================================================================
-// 访问控制的下载和订阅路由 (已升级)
+// 下载和订阅路由 - 无需密码检查，因为URL本身是秘密
 // =================================================================================
-/**
- * @description 通用的受保护资源访问函数
- * @param {string} r2Key - R2中的文件完整路径
- * @param {URL} url - 当前请求的URL对象，用于获取token
- * @param {object} env - Worker环境变量
- * @returns {Response}
- */
-async function getProtectedResource(r2Key, url, env) {
-    const object = await env.SUB_STORE.get(r2Key);
-    if (object === null) {
-        return new Response('Object Not Found.', { status: 404 });
-    }
-
-    const storedPassword = object.customMetadata?.password;
-    
-    // 如果文件有密码保护
-    if (storedPassword) {
-        const token = url.searchParams.get('token');
-        if (token !== storedPassword) {
-            return new Response('Access denied. Invalid or missing token.', { status: 403 });
-        }
-    }
-    
-    return object; // 返回获取到的R2Object
-}
-
-
-router.get(/^\/download\/(?<path>.+)$/, async ({ params, env, url }) => {
-    const object = await getProtectedResource(params.path, url, env);
-    // 检查返回的是否是一个Response对象（表示出错或拒绝访问）
-    if (object instanceof Response) {
-        return object;
-    }
-    
+router.get(/^\/download\/(?<path>.+)$/, async ({ params, env }) => {
+	const object = await env.SUB_STORE.get(params.path);
+	if (object === null) {
+		return new Response('Object Not Found', { status: 404 });
+	}
 	const headers = new Headers();
 	object.writeHttpMetadata(headers);
 	headers.set('etag', object.httpEtag);
 	const filename = params.path.split('/').pop();
 	headers.set('Content-Disposition', `attachment; filename="${filename}"`);
-
 	return new Response(object.body, { headers });
 });
 
 
-router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request, url }) => {
+router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request }) => {
     const r2Key = `subs/${params.path}`;
-    const object = await getProtectedResource(r2Key, url, env);
-    // 检查返回的是否是一个Response对象（表示出错或拒绝访问）
-    if (object instanceof Response) {
-        return object;
+    const object = await env.SUB_STORE.get(r2Key);
+    if (object === null) {
+        return new Response('Subscription not found in R2.', { status: 404 });
     }
-
     const configText = await object.text();
     const headers = new Headers();
-    
     headers.set('Content-Type', 'text/plain; charset=utf-8');
     headers.set('etag', object.httpEtag);
-    
     const proxyCount = (configText.match(/name:/g) || []).length;
     const expireTimestamp = object.expires 
         ? Math.floor(object.expires.getTime() / 1000) 
         : Math.floor((Date.now() + 7 * 24 * 60 * 60 * 1000) / 1000);
-
     headers.set('subscription-userinfo', `upload=0; download=0; total=107374182400; expire=${expireTimestamp}`);
     headers.set('profile-update-interval', '24');
     headers.set('profile-web-page-url', new URL(request.url).origin);
-
     return new Response(configText, { headers });
 });
 

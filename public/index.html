@@ -16,7 +16,7 @@
         <div class="w-full max-w-2xl">
             <header class="text-center mb-8">
                 <h1 class="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white">通用订阅转换</h1>
-                <p class="mt-2 text-lg text-gray-500 dark:text-gray-400">粘贴分享链接或订阅地址，生成带密码的分享</p>
+                <p class="mt-2 text-lg text-gray-500 dark:text-gray-400">生成一个唯一的提取码来分享您的订阅</p>
             </header>
             <main class="w-full bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
                 <!-- Input Area -->
@@ -37,33 +37,25 @@
                         </select>
                     </div>
                     <div>
-                        <label for="password-input" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">设置密码 (可选)</label>
-                        <input type="password" id="password-input" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" placeholder="留空则不加密">
+                        <label for="password-input" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">自定义提取码 (可选)</label>
+                        <input type="text" id="password-input" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" placeholder="留空则自动生成">
                     </div>
                 </div>
                 <!-- Action Button -->
                 <button id="convert-btn" class="w-full text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 dark:focus:ring-blue-800 font-medium rounded-lg text-sm px-5 py-3 text-center transition-all duration-200 ease-in-out flex items-center justify-center">
-                    <span id="btn-text">生成分享ID</span>
+                    <span id="btn-text">生成提取码</span>
                     <svg id="loader" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                 </button>
                 <!-- Conversion Result Area -->
                 <div id="convert-result-area" class="hidden space-y-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-                    <h3 class="text-lg font-semibold text-gray-800 dark:text-white">🎉 生成成功！请使用以下ID和密码提取链接。</h3>
-                    <div class="p-3 bg-gray-100 dark:bg-gray-700 rounded-lg">
-                        <p class="text-sm font-medium text-gray-700 dark:text-gray-300">Clash 分享ID:</p>
+                    <h3 class="text-lg font-semibold text-gray-800 dark:text-white">🎉 生成成功！请使用以下提取码分享。</h3>
+                    <div class="p-4 bg-gray-100 dark:bg-gray-700 rounded-lg">
+                         <p class="text-sm font-medium text-gray-700 dark:text-gray-300">您的专属提取码:</p>
                         <div class="flex items-center justify-between mt-1">
-                           <span id="clash-id-display" class="text-sm font-mono text-indigo-500 truncate pr-2"></span>
-                           <button class="copy-btn text-xs" data-clipboard-target="#clash-id-display">复制</button>
+                           <span id="extraction-code-display" class="text-sm font-mono text-indigo-500 truncate pr-2"></span>
+                           <button class="copy-btn px-2 py-1 text-xs bg-gray-200 dark:bg-gray-600 rounded" data-clipboard-target="#extraction-code-display">复制</button>
                         </div>
                     </div>
-                    <div class="p-3 bg-gray-100 dark:bg-gray-700 rounded-lg">
-                        <p class="text-sm font-medium text-gray-700 dark:text-gray-300">Sing-box 分享ID:</p>
-                         <div class="flex items-center justify-between mt-1">
-                           <span id="singbox-id-display" class="text-sm font-mono text-indigo-500 truncate pr-2"></span>
-                           <button class="copy-btn text-xs" data-clipboard-target="#singbox-id-display">复制</button>
-                        </div>
-                    </div>
-                    <p id="password-display" class="text-sm text-center text-yellow-500"></p>
                 </div>
             </main>
         </div>
@@ -74,20 +66,14 @@
         <!-- Part 2: Extraction Area -->
         <div class="w-full max-w-2xl">
             <header class="text-center mb-8">
-                <h1 class="text-3xl font-bold text-gray-900 dark:text-white">提取链接</h1>
-                <p class="mt-2 text-base text-gray-500 dark:text-gray-400">使用分享ID和密码获取真实的订阅/下载链接</p>
+                <h1 class="text-3xl font-bold text-gray-900 dark:text-white">凭码提取</h1>
+                <p class="mt-2 text-base text-gray-500 dark:text-gray-400">使用提取码获取真实的订阅/下载链接</p>
             </header>
             <main class="w-full bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
                 <!-- Extraction Input -->
-                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label for="extract-id-input" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">分享ID</label>
-                        <input type="text" id="extract-id-input" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-green-500 focus:border-green-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="粘贴clash-xxx或singbox-xxx">
-                    </div>
-                    <div>
-                        <label for="extract-password-input" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">密码 (如果设置了)</label>
-                        <input type="password" id="extract-password-input" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-green-500 focus:border-green-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="输入密码">
-                    </div>
+                 <div>
+                    <label for="extract-code-input" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">提取码</label>
+                    <input type="text" id="extract-code-input" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-green-500 focus:border-green-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="输入朋友分享给您的提取码">
                 </div>
                  <!-- Extraction Button -->
                 <button id="extract-btn" class="w-full text-white bg-green-600 hover:bg-green-700 focus:ring-4 focus:ring-green-300 dark:focus:ring-green-800 font-medium rounded-lg text-sm px-5 py-3 text-center transition-all duration-200 ease-in-out flex items-center justify-center">
@@ -95,15 +81,26 @@
                     <svg id="extract-loader" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                 </button>
                 <!-- Extraction Result Area -->
-                <div id="extract-result-area" class="hidden space-y-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <div id="extract-result-area" class="hidden space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                     <h3 class="text-lg font-semibold text-gray-800 dark:text-white">✅ 提取成功！</h3>
+                    <!-- Clash Link -->
                     <div class="p-4 bg-gray-100 dark:bg-gray-700 rounded-lg">
                         <div class="flex items-center justify-between">
                             <div>
-                                <p class="font-semibold text-gray-900 dark:text-white">最终链接</p>
-                                <p id="final-url-display" class="text-xs text-blue-500 break-all pr-2">正在生成...</p>
+                                <p class="font-semibold text-gray-900 dark:text-white">Clash 订阅链接</p>
+                                <a id="clash-result-link" href="#" target="_blank" class="text-xs text-blue-500 break-all pr-2 hover:underline"></a>
                             </div>
-                            <button class="copy-btn" data-clipboard-target="#final-url-display">复制</button>
+                            <button class="copy-btn px-2 py-1 text-xs bg-gray-200 dark:bg-gray-600 rounded" data-clipboard-target="#clash-result-link">复制</button>
+                        </div>
+                    </div>
+                     <!-- Singbox Link -->
+                    <div class="p-4 bg-gray-100 dark:bg-gray-700 rounded-lg">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="font-semibold text-gray-900 dark:text-white">Sing-box 下载链接</p>
+                                <a id="singbox-result-link" href="#" target="_blank" class="text-xs text-blue-500 break-all pr-2 hover:underline"></a>
+                            </div>
+                            <a id="singbox-result-download" href="#" class="px-2 py-1 text-xs text-white bg-green-500 rounded">下载</a>
                         </div>
                     </div>
                 </div>
@@ -111,7 +108,7 @@
         </div>
 
         <!-- Universal Error Message Area -->
-        <div id="error-message" class="hidden fixed bottom-5 right-5 p-4 text-sm text-white bg-red-600 rounded-lg shadow-xl" role="alert">
+        <div id="error-message" class="hidden fixed bottom-5 right-5 p-4 text-sm text-white bg-red-600 rounded-lg shadow-xl transition-opacity duration-300" role="alert">
             <span class="font-medium">错误:</span> <span id="error-text"></span>
         </div>
         
