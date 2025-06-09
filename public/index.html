@@ -78,7 +78,18 @@
                     <!-- Extraction Result Area -->
                     <div id="extract-result-area" class="hidden space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                         <h3 class="text-lg font-semibold text-gray-800 dark:text-white">✅ 提取成功！</h3>
-                        <p class="text-sm text-gray-500 dark:text-gray-400 -mt-2">以下链接已将您输入的所有节点合并，可作为通用订阅链接使用。</p>
+                        
+                        <!-- Generic Sub Link -->
+                        <div class="p-4 bg-yellow-50 dark:bg-yellow-900/50 rounded-lg border border-yellow-200 dark:border-yellow-800">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="font-semibold text-yellow-800 dark:text-yellow-200">通用订阅链接 (V2RayN等)</p>
+                                    <a id="generic-result-link" href="#" target="_blank" class="text-xs text-blue-500 break-all pr-2 hover:underline"></a>
+                                </div>
+                                <button class="copy-btn px-2 py-1 text-xs bg-gray-200 dark:bg-gray-600 rounded" data-clipboard-target="#generic-result-link">复制</button>
+                            </div>
+                        </div>
+
                         <!-- Clash Link -->
                         <div class="p-4 bg-gray-100 dark:bg-gray-700 rounded-lg">
                             <div class="flex items-center justify-between">

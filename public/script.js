@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const extractCodeInput = document.getElementById('extract-code-input');
     const extractBtn = document.getElementById('extract-btn');
     const extractResultArea = document.getElementById('extract-result-area');
+    const genericResultLink = document.getElementById('generic-result-link');
     const clashResultLink = document.getElementById('clash-result-link');
     const singboxResultLink = document.getElementById('singbox-result-link');
     const singboxResultDownload = document.getElementById('singbox-result-download');
@@ -95,11 +96,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
             
             if(result.success) {
+                // 【更新】: 填充所有三个链接
+                genericResultLink.textContent = result.genericSubUrl;
+                genericResultLink.href = result.genericSubUrl;
+                
                 clashResultLink.textContent = result.clashUrl;
                 clashResultLink.href = result.clashUrl;
+
                 singboxResultLink.textContent = result.singboxUrl;
                 singboxResultLink.href = result.singboxUrl;
                 singboxResultDownload.href = result.singboxUrl;
+
                 extractResultArea.classList.remove('hidden');
             } else {
                  throw new Error(result.message || '提取失败。');
