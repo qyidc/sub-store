@@ -1,12 +1,12 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers! (会话有效期最终版)
+ * 欢迎来到 Cloudflare Workers! (带通用订阅链接的最终版)
  * =================================================================================
  *
  * 【核心升级】:
- * 1. 【会话有效期】: 新增了 "0" 天选项，代表一个5分钟的超短生命周期，实现“阅后即焚”的效果。
- * 2. 【默认行为】: 前端将默认使用“会话”有效期，提升默认安全性。
- * 3. 【代码定型】: 这是为当前所有功能设计的最终稳定版后端代码。
+ * 1. 【通用订阅】: 新增生成一个Base64编码的、包含所有原始节点链接的通用订阅文件，适用于V2RayN等客户端。
+ * 2. 【新增路由】: 添加 /generic/... 路由，专门用于提供此通用订阅。
+ * 3. 【API增强】: /extract 接口现在会一次性返回Clash, Sing-box, 和通用订阅三个链接。
  */
 
 // =================================================================================
@@ -52,6 +52,7 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 
 		const lines = subscription_data.split(/[\r\n]+/).filter(line => line.trim() !== '');
 		let allProxies = [];
+        let allShareLinks = []; // 【新增】用于收集所有有效的原始分享链接
 
 		for (const line of lines) {
 			if (line.startsWith('http://') || line.startsWith('https://')) {
@@ -70,11 +71,17 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 				const remoteLines = decodedContent.split(/[\r\n]+/).filter(l => l.trim() !== '');
 				for (const remoteLine of remoteLines) {
 					const proxies = await parseShareLink(remoteLine);
-					allProxies.push(...proxies);
+                    if (proxies.length > 0) {
+					    allProxies.push(...proxies);
+                        allShareLinks.push(remoteLine); // 收集远程订阅中的链接
+                    }
 				}
 			} else {
 				const proxies = await parseShareLink(line);
-				allProxies.push(...proxies);
+                if (proxies.length > 0) {
+				    allProxies.push(...proxies);
+                    allShareLinks.push(line); // 收集直接输入的链接
+                }
 			}
 		}
 
@@ -88,33 +95,32 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 
 		const clashConfig = generateClashConfig(allProxies);
 		const singboxConfig = generateSingboxConfig(allProxies);
+        // 【新增】生成通用订阅内容
+        const genericSubContent = btoa(allShareLinks.join('\n'));
         
         const extractionCode = crypto.randomUUID();
 
         const clashFileId = `clash-${extractionCode}.yaml`;
         const singboxFileId = `singbox-${extractionCode}.json`;
+        const genericFileId = `generic-${extractionCode}.txt`; // 通用订阅文件名
 
         const clashSubR2Key = `subs/${clashFileId}`;
 		const singboxR2Key = `configs/${singboxFileId}`;
+        const genericSubR2Key = `generic/${genericFileId}`; // 通用订阅存储路径
         
-        // 【升级】: 处理会话级有效期
         const days = parseInt(expirationDays);
         let expiration;
         if (days === 0) {
-            // "0" 代表会话级，设置为5分钟后过期
             expiration = new Date(Date.now() + 5 * 60 * 1000); 
         } else {
-            // 否则按天数计算
             expiration = new Date(Date.now() + (days || 7) * 24 * 60 * 60 * 1000);
         }
 
-        const r2Options = {
-            httpMetadata: {},
-            expires: expiration,
-        };
+        const r2Options = { expires: expiration };
 
 		await env.SUB_STORE.put(clashSubR2Key, clashConfig, { ...r2Options, httpMetadata: { contentType: 'application/x-yaml; charset=utf-8' }});
         await env.SUB_STORE.put(singboxR2Key, singboxConfig, { ...r2Options, httpMetadata: { contentType: 'application/json; charset=utf-8' } });
+        await env.SUB_STORE.put(genericSubR2Key, genericSubContent, { ...r2Options, httpMetadata: { contentType: 'text/plain; charset=utf-8' } });
 
 		return new Response(JSON.stringify({
 			success: true,
@@ -141,9 +147,11 @@ router.post(/^\/extract$/, async ({ request, env }) => {
         
         const clashFileId = `clash-${extractionCode}.yaml`;
         const singboxFileId = `singbox-${extractionCode}.json`;
+        const genericFileId = `generic-${extractionCode}.txt`;
         
         const clashR2Key = `subs/${clashFileId}`;
         const singboxR2Key = `configs/${singboxFileId}`;
+        const genericR2Key = `generic/${genericFileId}`;
 
         const object = await env.SUB_STORE.head(clashR2Key);
         if (object === null) {
@@ -153,11 +161,13 @@ router.post(/^\/extract$/, async ({ request, env }) => {
         const urlBase = new URL(request.url).origin;
         const clashUrl = `${urlBase}/sub/${clashFileId}`;
         const singboxUrl = `${urlBase}/download/${singboxR2Key}`;
+        const genericSubUrl = `${urlBase}/generic/${genericFileId}`;
         
         return new Response(JSON.stringify({ 
             success: true, 
             clashUrl: clashUrl,
             singboxUrl: singboxUrl,
+            genericSubUrl: genericSubUrl, // 【新增】返回通用订阅链接
         }), {
             headers: { 'Content-Type': 'application/json' },
         });
@@ -166,6 +176,22 @@ router.post(/^\/extract$/, async ({ request, env }) => {
         console.error('Extraction error:', e);
         return new Response(`An error occurred: ${e.message}`, { status: 500 });
     }
+});
+
+
+// =================================================================================
+// 新增路由: /generic (提供通用订阅)
+// =================================================================================
+router.get(/^\/generic\/(?<path>.+)$/, async ({ params, env }) => {
+	const object = await env.SUB_STORE.get(`generic/${params.path}`);
+	if (object === null) {
+		return new Response('Generic subscription not found.', { status: 404 });
+	}
+	const headers = new Headers();
+    // 直接返回纯文本，客户端会自行处理Base64
+	headers.set('Content-Type', 'text/plain; charset=utf-8');
+	headers.set('etag', object.httpEtag);
+	return new Response(object.body, { headers });
 });
 
 
