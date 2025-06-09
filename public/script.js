@@ -1,5 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     // --- Part 1: Conversion Elements ---
+    const conversionForm = document.getElementById('conversion-form'); // 【升级】获取form元素
     const subInput = document.getElementById('sub-input');
     const expirationSelect = document.getElementById('expiration-select');
     const convertBtn = document.getElementById('convert-btn');
@@ -22,23 +23,29 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Universal Elements ---
     const errorMessage = document.getElementById('error-message');
     const errorText = document.getElementById('error-text');
-    const turnstileWidget = document.querySelector('.cf-turnstile'); // Get turnstile widget element
+    const turnstileWidget = document.querySelector('.cf-turnstile');
 
     // --- Event Listeners ---
 
-    // 1. Conversion Logic
-    convertBtn.addEventListener('click', async () => {
-        const inputData = subInput.value.trim();
-        if (!inputData) {
+    // 1. Conversion Logic - 【升级】监听表单的 'submit' 事件
+    conversionForm.addEventListener('submit', async (event) => {
+        event.preventDefault(); // 阻止浏览器默认的页面刷新行为
+
+        // 【升级】使用 FormData API 来可靠地获取所有表单数据
+        const formData = new FormData(conversionForm);
+        const inputData = formData.get('subscription_data');
+        const expirationDays = formData.get('expirationDays');
+        const turnstileToken = formData.get('cf-turnstile-response');
+
+        if (!inputData || inputData.trim() === '') {
             showError('订阅链接或分享链接不能为空。');
             return;
         }
         
-        // 【新增】获取 Turnstile 令牌
-        // Turnstile 会在页面上自动创建一个隐藏的 textarea，名字是 'cf-turnstile-response'
-        const turnstileToken = document.querySelector('textarea[name=cf-turnstile-response]')?.value;
         if (!turnstileToken) {
             showError('请先完成人机验证。如果看不到验证模块，请刷新页面。');
+            // 注意：在实际情况中，由于表单提交，这个错误很难触发，
+            // 因为Turnstile通常会阻止没有令牌的表单提交。但保留作为保险。
             return;
         }
 
@@ -47,10 +54,9 @@ document.addEventListener('DOMContentLoaded', () => {
         convertResultArea.classList.add('hidden');
 
         try {
-            // 【升级】将令牌添加到请求体中
             const requestBody = {
                 subscription_data: inputData,
-                expirationDays: expirationSelect.value,
+                expirationDays: expirationDays,
                 turnstileToken: turnstileToken,
             };
 
@@ -60,7 +66,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify(requestBody),
             });
             
-            // 【重要】在重置Turnstile之前，先检查响应
             if (!response.ok) {
                 const errText = await response.text();
                 throw new Error(errText || `服务器错误: ${response.status}`);
@@ -78,14 +83,14 @@ document.addEventListener('DOMContentLoaded', () => {
             showError(error.message);
         } finally {
             setLoading(convertBtn, convertLoader, convertBtnText, false);
-            // 【新增】无论成功或失败，都重置Turnstile小组件，以便用户可以再次提交
-            if (typeof turnstile !== 'undefined') {
+            // 无论成功或失败，都重置Turnstile小组件，以便用户可以再次提交
+            if (typeof turnstile !== 'undefined' && turnstileWidget) {
                 turnstile.reset(turnstileWidget);
             }
         }
     });
 
-    // 2. Extraction Logic
+    // 2. Extraction Logic - (no change needed)
     extractBtn.addEventListener('click', async() => {
         const extractionCode = extractCodeInput.value.trim();
         if (!extractionCode) {

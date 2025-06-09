@@ -24,35 +24,41 @@
                     <p class="mt-2 text-lg text-gray-500 dark:text-gray-400">生成一个唯一的提取码来分享您的订阅</p>
                 </header>
                 <main class="w-full bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
-                    <!-- Input Area -->
-                    <div>
-                        <label for="sub-input" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">订阅链接 / 分享链接 (支持多行)</label>
-                        <div class="relative">
-                            <textarea id="sub-input" rows="8" class="block w-full text-sm text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500 p-2.5 transition" placeholder="vless://...&#10;https://example.com/sub..."></textarea>
+                    <!-- 【升级】: 使用 <form> 元素包裹所有输入项，这是最稳妥的方式 -->
+                    <form id="conversion-form">
+                        <!-- Input Area -->
+                        <div>
+                            <label for="sub-input" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">订阅链接 / 分享链接 (支持多行)</label>
+                            <div class="relative">
+                                <!-- 【升级】: 增加 name 属性 -->
+                                <textarea id="sub-input" name="subscription_data" rows="8" class="block w-full text-sm text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500 p-2.5 transition" placeholder="vless://...&#10;https://example.com/sub..."></textarea>
+                            </div>
                         </div>
-                    </div>
-                    <!-- Expiration Option -->
-                    <div>
-                        <label for="expiration-select" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">链接有效期</label>
-                        <select id="expiration-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white">
-                            <option value="0" selected>会话 (5分钟)</option>
-                            <option value="1">1 天</option>
-                            <option value="7">7 天</option>
-                            <option value="30">30 天</option>
-                        </select>
-                    </div>
+                        <!-- Expiration Option -->
+                        <div>
+                            <label for="expiration-select" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">链接有效期</label>
+                            <!-- 【升级】: 增加 name 属性 -->
+                            <select id="expiration-select" name="expirationDays" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white">
+                                <option value="0" selected>会话 (5分钟)</option>
+                                <option value="1">1 天</option>
+                                <option value="7">7 天</option>
+                                <option value="30">30 天</option>
+                            </select>
+                        </div>
 
-                    <!-- 【新增】Turnstile 人机验证小组件 -->
-                    <div class="my-4 flex justify-center">
-                        <!-- 【重要】请将下面的 YOUR_SITE_KEY_HERE 替换为您自己的Turnstile站点密钥 -->
-                        <div class="cf-turnstile" data-sitekey="0x4AAAAAABghloXWAFfIMuAZ"></div>
-                    </div>
+                        <!-- Turnstile 人机验证小组件 -->
+                        <div class="my-4 flex justify-center">
+                            <!-- 【重要】请将下面的 YOUR_SITE_KEY_HERE 替换为您自己的Turnstile站点密钥 -->
+                            <div class="cf-turnstile" data-sitekey="0x4AAAAAABghloXWAFfIMuAZ"></div>
+                        </div>
 
-                    <!-- Action Button -->
-                    <button id="convert-btn" class="w-full text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 dark:focus:ring-blue-800 font-medium rounded-lg text-sm px-5 py-3 text-center transition-all duration-200 ease-in-out flex items-center justify-center">
-                        <span id="btn-text">生成提取码</span>
-                        <svg id="loader" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                    </button>
+                        <!-- Action Button -->
+                        <!-- 【升级】: 按钮类型改为 type="submit"，用于提交表单 -->
+                        <button id="convert-btn" type="submit" class="w-full text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 dark:focus:ring-blue-800 font-medium rounded-lg text-sm px-5 py-3 text-center transition-all duration-200 ease-in-out flex items-center justify-center">
+                            <span id="btn-text">生成提取码</span>
+                            <svg id="loader" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        </button>
+                    </form>
                     <!-- Conversion Result Area -->
                     <div id="convert-result-area" class="hidden space-y-3 pt-4 border-t border-gray-200 dark:border-gray-700">
                         <h3 class="text-lg font-semibold text-gray-800 dark:text-white">🎉 生成成功！请使用以下提取码分享。</h3>
