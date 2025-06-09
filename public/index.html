@@ -7,6 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="/styles.css">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔄</text></svg>">
+    <!-- 【新增】加载Cloudflare Turnstile人机验证脚本 -->
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200 font-sans">
 
@@ -39,6 +41,13 @@
                             <option value="30">30 天</option>
                         </select>
                     </div>
+
+                    <!-- 【新增】Turnstile 人机验证小组件 -->
+                    <div class="my-4 flex justify-center">
+                        <!-- 【重要】请将下面的 YOUR_SITE_KEY_HERE 替换为您自己的Turnstile站点密钥 -->
+                        <div class="cf-turnstile" data-sitekey="YOUR_SITE_KEY_HERE"></div>
+                    </div>
+
                     <!-- Action Button -->
                     <button id="convert-btn" class="w-full text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 dark:focus:ring-blue-800 font-medium rounded-lg text-sm px-5 py-3 text-center transition-all duration-200 ease-in-out flex items-center justify-center">
                         <span id="btn-text">生成提取码</span>

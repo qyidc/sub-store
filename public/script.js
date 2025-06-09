@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Universal Elements ---
     const errorMessage = document.getElementById('error-message');
     const errorText = document.getElementById('error-text');
+    const turnstileWidget = document.querySelector('.cf-turnstile'); // Get turnstile widget element
 
     // --- Event Listeners ---
 
@@ -32,15 +33,25 @@ document.addEventListener('DOMContentLoaded', () => {
             showError('订阅链接或分享链接不能为空。');
             return;
         }
+        
+        // 【新增】获取 Turnstile 令牌
+        // Turnstile 会在页面上自动创建一个隐藏的 textarea，名字是 'cf-turnstile-response'
+        const turnstileToken = document.querySelector('textarea[name=cf-turnstile-response]')?.value;
+        if (!turnstileToken) {
+            showError('请先完成人机验证。如果看不到验证模块，请刷新页面。');
+            return;
+        }
 
         setLoading(convertBtn, convertLoader, convertBtnText, true);
         hideError();
         convertResultArea.classList.add('hidden');
 
         try {
+            // 【升级】将令牌添加到请求体中
             const requestBody = {
                 subscription_data: inputData,
                 expirationDays: expirationSelect.value,
+                turnstileToken: turnstileToken,
             };
 
             const response = await fetch('/convert', {
@@ -49,6 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify(requestBody),
             });
             
+            // 【重要】在重置Turnstile之前，先检查响应
             if (!response.ok) {
                 const errText = await response.text();
                 throw new Error(errText || `服务器错误: ${response.status}`);
@@ -66,6 +78,10 @@ document.addEventListener('DOMContentLoaded', () => {
             showError(error.message);
         } finally {
             setLoading(convertBtn, convertLoader, convertBtnText, false);
+            // 【新增】无论成功或失败，都重置Turnstile小组件，以便用户可以再次提交
+            if (typeof turnstile !== 'undefined') {
+                turnstile.reset(turnstileWidget);
+            }
         }
     });
 
@@ -96,7 +112,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
             
             if(result.success) {
-                // 【更新】: 填充所有三个链接
                 genericResultLink.textContent = result.genericSubUrl;
                 genericResultLink.href = result.genericSubUrl;
                 
