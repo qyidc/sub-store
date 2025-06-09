@@ -178,7 +178,11 @@ router.get(/^\/subs\/(?<path>.+)$/, async ({ params, env, request }) => {
     const headers = new Headers();
     object.writeHttpMetadata(headers); // This reads metadata, which is fine.
     headers.set('etag', object.httpEtag);
-    
+
+    // 添加下面这两行用于调试
+    console.log(`Subscription handler triggered for path: ${params.path}`); // 在后台日志中查看
+    headers.set('X-Handler-Debug', 'Subscription-Handler-Executed'); // 在浏览器响应头中查看
+     
     // Add subscription-info header for Clash clients, using the string variable.
     const proxyCount = (configText.match(/name:/g) || []).length;
     headers.set('subscription-userinfo', `upload=0; download=0; total=107374182400; expire=${Math.floor(object.expires.getTime() / 1000)}`);
