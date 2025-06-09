@@ -129,7 +129,7 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 
 		return new Response(JSON.stringify({
 			success: true,
-            clashSubUrl: `${urlBase}/${clashSubKey}`,
+            clashSubUrl: `${urlBase}/sub/${clashSubKey}`,
 			clashDownloadUrl: `/download/${clashDownloadKey}`,
 			singboxDownloadUrl: `/download/${singboxKey}`,
 		}), {
@@ -165,7 +165,7 @@ router.get(/^\/download\/(?<path>.+)$/, async ({ params, env }) => {
 /**
  * Handles GET requests for the Clash subscription link
  */
-router.get(/^\/subs\/(?<path>.+)$/, async ({ params, env, request }) => {
+router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request }) => {
     const object = await env.SUB_STORE.get(params.path);
 
     if (object === null) {
@@ -177,15 +177,13 @@ router.get(/^\/subs\/(?<path>.+)$/, async ({ params, env, request }) => {
 
     const headers = new Headers();
     object.writeHttpMetadata(headers); // This reads metadata, which is fine.
-    headers.set('etag', object.httpEtag);    
-     
+    headers.set('etag', object.httpEtag);
+    
     // Add subscription-info header for Clash clients, using the string variable.
     const proxyCount = (configText.match(/name:/g) || []).length;
     headers.set('subscription-userinfo', `upload=0; download=0; total=107374182400; expire=${Math.floor(object.expires.getTime() / 1000)}`);
     headers.set('profile-update-interval', '24'); // 24 hours
     headers.set('profile-web-page-url', new URL(request.url).origin);
-    // 代码增加后会导致 Clash 订阅地址无法解析
-    // headers.set('Content-Type', 'application/x-yaml; charset=utf-8');
 
     // Return a new response using the string variable as the body.
     return new Response(configText, { headers });
