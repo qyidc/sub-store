@@ -165,7 +165,7 @@ router.get(/^\/download\/(?<path>.+)$/, async ({ params, env }) => {
 /**
  * Handles GET requests for the Clash subscription link
  */
-router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request }) => {
+router.get(/^\/(?<path>.+)$/, async ({ params, env, request }) => {
     const object = await env.SUB_STORE.get(params.path);
 
     if (object === null) {
