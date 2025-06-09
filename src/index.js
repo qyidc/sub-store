@@ -129,7 +129,7 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 
 		return new Response(JSON.stringify({
 			success: true,
-            clashSubUrl: `${urlBase}/${clashSubKey}`,
+            clashSubUrl: `${urlBase}/sub/${clashSubKey}`,
 			clashDownloadUrl: `/download/${clashDownloadKey}`,
 			singboxDownloadUrl: `/download/${singboxKey}`,
 		}), {
