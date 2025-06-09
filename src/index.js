@@ -188,7 +188,7 @@ router.get(/^\/subs\/(?<path>.+)$/, async ({ params, env, request }) => {
     headers.set('subscription-userinfo', `upload=0; download=0; total=107374182400; expire=${Math.floor(object.expires.getTime() / 1000)}`);
     headers.set('profile-update-interval', '24'); // 24 hours
     headers.set('profile-web-page-url', new URL(request.url).origin);
-
+    headers.set('Content-Type', 'application/x-yaml; charset=utf-8');
     // Return a new response using the string variable as the body.
     return new Response(configText, { headers });
 });
