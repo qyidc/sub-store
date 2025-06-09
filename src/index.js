@@ -1,12 +1,12 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers! (UUID提取码的最终版)
+ * 欢迎来到 Cloudflare Workers! (会话有效期最终版)
  * =================================================================================
  *
  * 【核心升级】:
- * 1. 【简化流程】: 移除了自定义密码功能，始终使用系统生成的UUID作为唯一的“提取码”。
- * 2. 【杜绝冲突】: 由于UUID的唯一性，自然地解决了自定义提取码可能产生的冲突问题。
- * 3. 【API简化】: 后端 /convert 接口不再处理密码字段，逻辑更清晰。
+ * 1. 【会话有效期】: 新增了 "0" 天选项，代表一个5分钟的超短生命周期，实现“阅后即焚”的效果。
+ * 2. 【默认行为】: 前端将默认使用“会话”有效期，提升默认安全性。
+ * 3. 【代码定型】: 这是为当前所有功能设计的最终稳定版后端代码。
  */
 
 // =================================================================================
@@ -44,7 +44,6 @@ const router = Router();
 // =================================================================================
 router.post(/^\/convert$/, async ({ request, env }) => {
 	try {
-		// 【简化】: 不再接收 password 字段
 		const { subscription_data, expirationDays } = await request.json();
 
 		if (!subscription_data) {
@@ -90,7 +89,6 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 		const clashConfig = generateClashConfig(allProxies);
 		const singboxConfig = generateSingboxConfig(allProxies);
         
-        // 【简化】: 提取码(extractionCode)始终由 crypto.randomUUID() 生成
         const extractionCode = crypto.randomUUID();
 
         const clashFileId = `clash-${extractionCode}.yaml`;
@@ -99,8 +97,16 @@ router.post(/^\/convert$/, async ({ request, env }) => {
         const clashSubR2Key = `subs/${clashFileId}`;
 		const singboxR2Key = `configs/${singboxFileId}`;
         
-        const days = parseInt(expirationDays) || 7;
-        const expiration = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+        // 【升级】: 处理会话级有效期
+        const days = parseInt(expirationDays);
+        let expiration;
+        if (days === 0) {
+            // "0" 代表会话级，设置为5分钟后过期
+            expiration = new Date(Date.now() + 5 * 60 * 1000); 
+        } else {
+            // 否则按天数计算
+            expiration = new Date(Date.now() + (days || 7) * 24 * 60 * 60 * 1000);
+        }
 
         const r2Options = {
             httpMetadata: {},
@@ -124,7 +130,7 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 });
 
 // =================================================================================
-// 提取路由: /extract (逻辑不变，但更清晰)
+// 提取路由: /extract 
 // =================================================================================
 router.post(/^\/extract$/, async ({ request, env }) => {
     try {
@@ -164,7 +170,7 @@ router.post(/^\/extract$/, async ({ request, env }) => {
 
 
 // =================================================================================
-// 下载和订阅路由 - 无需修改
+// 下载和订阅路由
 // =================================================================================
 router.get(/^\/download\/(?<path>.+)$/, async ({ params, env }) => {
 	const object = await env.SUB_STORE.get(params.path);
@@ -202,7 +208,7 @@ router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request }) => {
 
 
 // =================================================================================
-// 静态资源服务 (Serving Static Assets) - 无需修改
+// 静态资源服务 (Serving Static Assets)
 // =================================================================================
 async function serveStaticAsset({ request, env }) {
 	const url = new URL(request.url);
