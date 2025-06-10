@@ -1,100 +1,10 @@
 document.addEventListener('DOMContentLoaded', () => {
     // #################################################################################
-    //                          协议解析与配置生成模块 (最终修复版)
+    //                          协议解析与配置生成模块 (已迁移至前端)
     // #################################################################################
-    
-    // Base64-URL解码函数，用于SSR链接
-    function b64UrlDecode(str) {
-        try {
-            str = str.replace(/-/g, '+').replace(/_/g, '/');
-            while (str.length % 4) { str += '='; }
-            return atob(str);
-        } catch(e) {
-            console.error("Base64URL Decode Failed:", e);
-            return "";
-        }
-    }
-
-    function parseShadowsocks(link) {
-        try {
-            // 1. 尝试标准URL格式: ss://<auth>@<host>:<port>#<tag>
-            //    其中 <auth> 部分可以是 method:pass 或者 base64(method:pass)
-            const url = new URL(link);
-            const name = decodeURIComponent(url.hash).substring(1) || `${url.hostname}:${url.port}`;
-            let cipher, password;
-
-            // 尝试将 username 部分作为 base64 解码
-            try {
-                const decodedAuth = atob(url.username);
-                const authParts = decodedAuth.split(':');
-                if (authParts.length >= 2) {
-                    cipher = authParts[0];
-                    password = authParts.slice(1).join(':');
-                }
-            } catch (e) {
-                // 如果解码失败, 假定为 method:password 格式
-                cipher = url.username;
-                password = url.password;
-            }
-
-            if (url.hostname && url.port && cipher && password) {
-                return { name, type: 'ss', server: url.hostname, port: parseInt(url.port, 10), cipher, password, udp: true };
-            }
-        } catch (e) {
-            // 如果URL解析失败，则可能是SIP002格式，继续尝试
-        }
-
-        // 2. 尝试SIP002格式: ss://<base64(method:password@server:port)>#<tag>
-        try {
-            const parts = link.substring(5).split('#');
-            const decoded = atob(parts[0]);
-            const name = parts[1] ? decodeURIComponent(parts[1]) : null;
-            
-            const atIndex = decoded.lastIndexOf('@');
-            if (atIndex === -1) return null; // 格式无效
-            
-            const authPart = decoded.substring(0, atIndex);
-            const hostPart = decoded.substring(atIndex + 1);
-            
-            const [cipher, password] = authPart.split(':');
-            const [server, port] = hostPart.split(':');
-            
-            if (server && port && cipher && password) {
-                return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };
-            }
-        } catch (e) {
-            console.error("Failed to parse SS link in any known format:", link, e);
-        }
-
-        return null;
-    }
-
-    function parseShadowsocksR(link) {
-        try {
-            const decoded = b64UrlDecode(link.substring('ssr://'.length));
-            const mainParts = decoded.split('/?');
-            const [server, port, protocol, cipher, obfs, password_b64] = mainParts[0].split(':');
-            const params = new URLSearchParams(mainParts[1] || '');
-
-            return {
-                name: params.get('remarks') ? b64UrlDecode(params.get('remarks')) : `${server}:${port}`,
-                type: 'ssr',
-                server: server,
-                port: parseInt(port, 10),
-                cipher: cipher,
-                password: b64UrlDecode(password_b64),
-                protocol: protocol,
-                'protocol-param': params.get('protoparam') ? b64UrlDecode(params.get('protoparam')) : '',
-                obfs: obfs,
-                'obfs-param': params.get('obfsparam') ? b64UrlDecode(params.get('obfsparam')) : '',
-                udp: true
-            };
-        } catch (e) {
-            console.error("Failed to parse SSR link:", link, e);
-            return null;
-        }
-    }
-
+    function b64UrlDecode(str) {try {str = str.replace(/-/g, '+').replace(/_/g, '/');while (str.length % 4) { str += '='; }return atob(str);} catch(e) {console.error("Base64URL Decode Failed:", e);return "";}}
+    function parseShadowsocks(link) {try {const url = new URL(link);const name = decodeURIComponent(url.hash).substring(1) || `${url.hostname}:${url.port}`;let cipher, password;try {const decodedAuth = atob(url.username);const authParts = decodedAuth.split(':');if (authParts.length >= 2) {cipher = authParts[0];password = authParts.slice(1).join(':');}} catch (e) {cipher = url.username;password = url.password;}if (url.hostname && url.port && cipher && password) {return { name, type: 'ss', server: url.hostname, port: parseInt(url.port, 10), cipher, password, udp: true };}} catch (e) {}try {const parts = link.substring(5).split('#');const decoded = atob(parts[0]);const name = parts[1] ? decodeURIComponent(parts[1]) : null;const atIndex = decoded.lastIndexOf('@');if (atIndex === -1) return null;const authPart = decoded.substring(0, atIndex);const hostPart = decoded.substring(atIndex + 1);const [cipher, password] = authPart.split(':');const [server, port] = hostPart.split(':');if (server && port && cipher && password) {return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };}} catch (e) {console.error("Failed to parse SS link in any known format:", link, e);}return null;}
+    function parseShadowsocksR(link) {try {const decoded = b64UrlDecode(link.substring('ssr://'.length));const mainParts = decoded.split('/?');const [server, port, protocol, cipher, obfs, password_b64] = mainParts[0].split(':');const params = new URLSearchParams(mainParts[1] || '');return {name: params.get('remarks') ? b64UrlDecode(params.get('remarks')) : `${server}:${port}`,type: 'ssr',server: server,port: parseInt(port, 10),cipher: cipher,password: b64UrlDecode(password_b64),protocol: protocol,'protocol-param': params.get('protoparam') ? b64UrlDecode(params.get('protoparam')) : '',obfs: obfs,'obfs-param': params.get('obfsparam') ? b64UrlDecode(params.get('obfsparam')) : '',udp: true};} catch (e) {console.error("Failed to parse SSR link:", link, e);return null;}}
     function parseShareLink(link) {if (!link) return [];try {let decodedLink = link;if (!link.includes('://') && (link.length % 4 === 0) && /^[a-zA-Z0-9+/]*={0,2}$/.test(link)) {try { decodedLink = atob(link); } catch (e) { /* ignore */ }}if (decodedLink.startsWith('ss://')) return [parseShadowsocks(decodedLink)];if (decodedLink.startsWith('ssr://')) return [parseShadowsocksR(decodedLink)];if (decodedLink.startsWith('vless://')) return [parseVless(decodedLink)];if (decodedLink.startsWith('vmess://')) return [parseVmess(decodedLink)];if (decodedLink.startsWith('trojan://')) return [parseTrojan(decodedLink)];if (decodedLink.startsWith('tuic://')) return [parseTuic(decodedLink)];if (decodedLink.startsWith('hysteria2://')) return [parseHysteria2(decodedLink)];} catch (error) {console.warn(`Skipping invalid link: ${link.substring(0, 40)}...`, error.message);return [];}return [];}
     function parseVless(link) {try {const url = new URL(link);const params = url.searchParams;const proxy = {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'vless',server: url.hostname,port: parseInt(url.port, 10),uuid: url.username,network: params.get('type') || 'tcp',tls: params.get('security') === 'tls' || params.get('security') === 'reality',udp: true,flow: params.get('flow') || '','client-fingerprint': params.get('fp') || 'chrome',};if (proxy.tls) {proxy.servername = params.get('sni') || url.hostname;proxy.alpn = params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"];if (params.get('security') === 'reality') {proxy['reality-opts'] = { 'public-key': params.get('pbk'), 'short-id': params.get('sid') };}}if (proxy.network === 'ws') proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || url.hostname } };if (proxy.network === 'grpc') proxy['grpc-opts'] = { 'grpc-service-name': params.get('serviceName') || '' };return proxy;} catch(e) { console.error("Failed to parse VLESS link:", link, e); return null; } }
     function parseVmess(link) {try {const jsonStr = atob(link.substring('vmess://'.length));const config = JSON.parse(jsonStr);return {name: config.ps || config.add, type: 'vmess', server: config.add, port: parseInt(config.port, 10),uuid: config.id, alterId: config.aid, cipher: config.scy || 'auto',tls: config.tls === 'tls', network: config.net || 'tcp', udp: true,servername: config.sni || undefined,'ws-opts': config.net === 'ws' ? { path: config.path || '/', headers: { Host: config.host || config.add } } : undefined,'h2-opts': config.net === 'h2' ? { path: config.path || '/', host: [config.host || config.add] } : undefined,'grpc-opts': config.net === 'grpc' ? { 'grpc-service-name': config.path || ''} : undefined,};} catch(e) { console.error("Failed to parse VMess link:", link, e); return null; } }
@@ -119,37 +29,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const genericResultLink = document.getElementById('generic-result-link');
     const clashResultLink = document.getElementById('clash-result-link');
     const singboxResultLink = document.getElementById('singbox-result-link');
-    const singboxResultDownload = document.getElementById('singbox-result-download');
     const extractBtnText = document.getElementById('extract-btn-text');
     const extractLoader = document.getElementById('extract-loader');
     const errorMessage = document.getElementById('error-message');
     const errorText = document.getElementById('error-text');
-    const turnstileWidget = document.querySelector('.cf-turnstile');
 
     // --- Event Listeners ---
-    conversionForm.addEventListener('submit', async (event) => {
-        event.preventDefault(); 
-
-        const formData = new FormData(conversionForm);
-        const inputData = formData.get('subscription_data').trim();
-        const expirationDays = formData.get('expirationDays');
-        const turnstileToken = formData.get('cf-turnstile-response');
-
+    convertBtn.addEventListener('click', async () => {
+        const inputData = subInput.value.trim();
         if (!inputData) {
             showError('订阅链接或分享链接不能为空。');
-            return;
-        }
-        
-        if (!turnstileToken) {
-            showError('请等待人机验证完成。');
             return;
         }
 
         setLoading(convertBtn, convertLoader, convertBtnText, true);
         hideError();
         convertResultArea.classList.add('hidden');
-
-        let conversionSucceeded = false;
 
         try {
             const lines = inputData.split(/[\r\n]+/).filter(line => line.trim() !== '');
@@ -173,14 +68,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const singboxConfig = generateSingboxConfig(allProxies);
             const genericSubContent = btoa(allShareLinks.join('\n'));
 
+            const extractionCode = crypto.randomUUID(); 
+            const dataToEncrypt = JSON.stringify({
+                clash: clashConfig,
+                singbox: singboxConfig,
+                generic: genericSubContent
+            });
+            const encryptedData = CryptoJS.AES.encrypt(dataToEncrypt, extractionCode).toString();
+            
             const requestBody = {
-                subscription_data: { // 将所有配置打包
-                    clash: clashConfig,
-                    singbox: singboxConfig,
-                    generic: genericSubContent
-                },
-                expirationDays: expirationDays,
-                turnstileToken: turnstileToken,
+                extractionCode: extractionCode,
+                encryptedData: encryptedData,
+                expirationDays: expirationSelect.value,
             };
 
             const response = await fetch('/convert', {
@@ -197,19 +96,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
 
             if (result.success) {
-                extractionCodeDisplay.textContent = result.extractionCode;
+                extractionCodeDisplay.textContent = extractionCode;
                 convertResultArea.classList.remove('hidden');
-                conversionSucceeded = true;
             } else {
-                 throw new Error(result.message || '转换失败，但未提供明确原因。');
+                 throw new Error('转换失败，但未提供明确原因。');
             }
         } catch (error) {
             showError(error.message);
         } finally {
             setLoading(convertBtn, convertLoader, convertBtnText, false);
-            if (!conversionSucceeded && typeof turnstile !== 'undefined' && turnstileWidget) {
-                turnstile.reset(turnstileWidget);
-            }
         }
     });
 
@@ -239,7 +134,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
             
             if(result.success) {
-                const configs = result.configs;
+                const decryptedBytes = CryptoJS.AES.decrypt(result.encryptedData, extractionCode);
+                const decryptedText = decryptedBytes.toString(CryptoJS.enc.Utf8);
+                
+                if (!decryptedText) {
+                    throw new Error("解密失败！提取码可能不正确。");
+                }
+                
+                const configs = JSON.parse(decryptedText);
 
                 const clashBlob = new Blob([configs.clash], { type: 'text/plain;charset=utf-8' });
                 const singboxBlob = new Blob([configs.singbox], { type: 'application/json;charset=utf-8' });
