@@ -1,12 +1,12 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers! (带提取日志的最终版)
+ * 欢迎来到 Cloudflare Workers! (提取修复最终版)
  * =================================================================================
  *
  * 【架构定型】:
  * 1. 【CORS支持】: 正确处理CORS预检请求(OPTIONS)，允许前端发送 `application/json` 类型的POST请求。
  * 2. 【纯粹的E2EE】: 此后端只负责存储和提取加密数据。所有明文处理逻辑和相关GET路由已被彻底移除。
- * 3. 【提取调试】: 在 /extract 接口中加入了详细的日志，用于追踪数据从R2到前端的全过程。
+ * 3. 【提取修复】: 修正了从R2获取对象后未正确提取其文本内容的逻辑错误。
  */
 
 // =================================================================================
@@ -100,35 +100,30 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 });
 
 // =================================================================================
-// 提取路由: /extract (只返回加密数据) - 【带详细日志】
+// 提取路由: /extract (只返回加密数据) - 【已修复】
 // =================================================================================
 router.post(/^\/extract$/, async ({ request, env }) => {
     try {
-        console.log("[BACKEND LOG] /extract endpoint hit.");
         const { extractionCode } = await request.json();
-        console.log(`[BACKEND LOG] Received request for extractionCode: ${extractionCode}`);
-        
         if (!extractionCode) {
-            console.error("[BACKEND LOG] Extraction code is missing from request.");
             return new Response('Extraction code is required.', { status: 400, headers: corsHeaders });
         }
         
         const r2Key = `e2ee/${extractionCode}`;
-        console.log(`[BACKEND LOG] Constructed R2 key: ${r2Key}`);
         
-        const object = await env.SUB_STORE.get(r2Key, { type: 'text' });
-        console.log("[BACKEND LOG] Performed R2 get operation.");
+        // 【重要修复】: 不再使用 { type: 'text' }，而是获取完整的 R2Object
+        const object = await env.SUB_STORE.get(r2Key);
 
         if (object === null) {
-            console.error(`[BACKEND LOG] Object not found in R2 for key: ${r2Key}`);
             return new Response('提取码无效或链接已过期。', { status: 404, headers: corsHeaders });
         }
         
-        console.log(`[BACKEND LOG] Object found. Data length: ${object.length}. Preparing to send to frontend.`);
+        // 【重要修复】: 从 R2Object 中显式地调用 .text() 方法来获取其字符串内容
+        const encryptedDataString = await object.text();
         
         return new Response(JSON.stringify({ 
             success: true, 
-            encryptedData: object,
+            encryptedData: encryptedDataString, // 返回正确的字符串内容
         }), {
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
