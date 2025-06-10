@@ -1,13 +1,38 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers! (纯粹的端到端加密1.1版)
+ * 欢迎来到 Cloudflare Workers! (纯粹的端到端加密最终修复版)
  * =================================================================================
  *
  * 【架构定型】:
- * 1. 【纯粹的E2EE】: 此后端只负责存储和提取加密数据。所有明文处理逻辑和相关GET路由已被彻底移除。
- * 2. 【角色明确】: 后端是“零知识”的仓库管理员，前端是“全能”的安全处理器。
- * 3. 【TTL机制说明】: 通过 `expires` 属性为R2对象设置生命周期，Cloudflare将在后台定期清理过期对象。
+ * 1. 【CORS修复】: 新增了对CORS预检请求(OPTIONS)的处理，允许前端发送 `application/json` 类型的POST请求。
+ * 2. 【纯粹的E2EE】: 此后端只负责存储和提取加密数据。所有明文处理逻辑已被移除。
+ * 3. 【角色明确】: 后端是“零知识”的仓库管理员，前端是“全能”的安全处理器。
  */
+
+// =================================================================================
+// 【新增】CORS 预检请求处理模块
+// =================================================================================
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
+function handleOptions(request) {
+  if (
+    request.headers.get('Origin') !== null &&
+    request.headers.get('Access-Control-Request-Method') !== null &&
+    request.headers.get('Access-Control-Request-Headers') !== null
+  ) {
+    // 这是一个CORS预检请求，返回允许的策略
+    return new Response(null, { headers: corsHeaders });
+  } else {
+    // 处理标准的OPTIONS请求
+    return new Response(null, {
+      headers: { Allow: 'GET, POST, OPTIONS' },
+    });
+  }
+}
 
 // =================================================================================
 // 路由模块 (Simple Router)
@@ -16,6 +41,11 @@ const Router = () => {
 	const routes = [];
 	const add = (method, path, handler) => routes.push({ method, path, handler });
 	const handle = async (request, env, ctx) => {
+        // 【重要】: 在处理任何路由之前，先处理OPTIONS请求
+        if (request.method === 'OPTIONS') {
+            return handleOptions(request);
+        }
+
 		const url = new URL(request.url);
 		for (const route of routes) {
 			if (request.method !== route.method) continue;
@@ -25,8 +55,6 @@ const Router = () => {
 				return await route.handler({ request, params, url, env, ctx });
 			}
 		}
-		// 【重要】: 对于E2EE架构，后端不再需要 /sub, /download, /generic 等GET路由，
-		// 因为所有文件内容都在前端解密和处理。我们只保留静态资源服务。
 		if (request.method === 'GET') {
 			return serveStaticAsset({ request, env });
 		}
@@ -52,25 +80,26 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 			return new Response('Missing extraction code or encrypted data.', { status: 400 });
 		}
 
-        const r2Key = `e2ee/${extractionCode}`; // 使用特定前缀以区分
+        const r2Key = `e2ee/${extractionCode}`;
         
         const days = parseInt(expirationDays);
         let expiration;
         if (days === 0) {
-            // "0" 代表会话级，设置为5分钟后过期
             expiration = new Date(Date.now() + 5 * 60 * 1000); 
         } else {
-            // 否则按天数计算
             expiration = new Date(Date.now() + (days || 7) * 24 * 60 * 60 * 1000);
         }
 
 		await env.SUB_STORE.put(r2Key, encryptedData, {
-            httpMetadata: { contentType: 'application/octet-stream' }, // 存储为二进制流
-            expires: expiration, // 设置过期时间
+            httpMetadata: { contentType: 'application/octet-stream' },
+            expires: expiration,
         });
 
 		return new Response(JSON.stringify({ success: true }), {
-			headers: { 'Content-Type': 'application/json' },
+			headers: { 
+                'Content-Type': 'application/json',
+                ...corsHeaders // 【新增】为响应添加CORS头
+            },
 		});
 
 	} catch (error) {
@@ -96,12 +125,14 @@ router.post(/^\/extract$/, async ({ request, env }) => {
             return new Response('提取码无效或链接已过期。', { status: 404 });
         }
         
-        // 原封不动地返回加密后的数据
         return new Response(JSON.stringify({ 
             success: true, 
             encryptedData: object,
         }), {
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                ...corsHeaders // 【新增】为响应添加CORS头
+            },
         });
 
     } catch (e) {
@@ -133,9 +164,6 @@ async function serveStaticAsset({ request, env }) {
 // =================================================================================
 export default {
 	async fetch(request, env, ctx) {
-		// 【重要】在E2EE架构下，后端不再需要处理CORS预检请求，因为GET请求是开放的，
-        // 而POST请求的响应是非关键的JSON，现代浏览器通常不需要为简单的JSON POST预检。
-        // 如果未来有更复杂的请求头，再考虑加回CORS处理。
 		return router.handle(request, env, ctx);
 	},
 };
