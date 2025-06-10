@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     // #################################################################################
-    //                          协议解析与配置生成模块 (最终修复版)
+    //                          协议解析与配置生成模块 (终极修复版)
     // #################################################################################
     
     /**
@@ -28,50 +28,57 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const hashIndex = link.indexOf('#');
             const name = hashIndex > -1 ? decodeURIComponent(link.substring(hashIndex + 1)) : null;
-            const mainPart = hashIndex > -1 ? link.substring(5, hashIndex) : link.substring(5);
+            const corePart = hashIndex > -1 ? link.substring(5, hashIndex) : link.substring(5);
 
-            // 1. 尝试解析格式: ss://<base64(method:password@server:port)>
-            if (mainPart.indexOf('@') > -1) {
-                 const atIndex = mainPart.lastIndexOf('@');
-                 const authPart = mainPart.substring(0, atIndex);
-                 const hostPart = mainPart.substring(atIndex + 1);
-                 
-                 let cipher, password;
-                 try {
-                     const decodedAuth = atob(authPart);
-                     const colonIndex = decodedAuth.indexOf(':');
-                     if (colonIndex > -1) {
-                         cipher = decodedAuth.substring(0, colonIndex);
-                         password = decodedAuth.substring(colonIndex + 1);
-                     }
-                 } catch (e) {
-                    // 如果auth部分不是base64, 尝试作为 method:pass@...
-                    const authParts = decodeURIComponent(authPart).split(':');
-                    if(authParts.length >= 2) {
-                        cipher = authParts[0];
-                        password = authParts.slice(1).join(':');
-                    }
-                 }
-
-                 const hostColonIndex = hostPart.lastIndexOf(':');
-                 const server = hostPart.substring(0, hostColonIndex);
-                 const port = hostPart.substring(hostColonIndex + 1);
-
-                 if (server && port && cipher && password) {
-                     return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };
-                 }
+            // Case 1: SIP002 format where the core is a single base64 string
+            // ss://<base64(method:password@server:port)>#<tag>
+            if (corePart.indexOf('@') === -1) {
+                const decoded = atob(corePart);
+                const atIndex = decoded.lastIndexOf('@');
+                if (atIndex === -1) throw new Error("Invalid SIP002 format: missing '@'");
+                const authPart = decoded.substring(0, atIndex);
+                const hostPart = decoded.substring(atIndex + 1);
+                const [cipher, password] = authPart.split(':');
+                const [server, port] = hostPart.split(':');
+                if (server && port && cipher && password) {
+                    return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };
+                }
             }
-            
-            // 2. 尝试解析格式: ss://<base64(method:password)>@server:port
-            const url = new URL(link);
-            if (url.username) {
-                 const decodedAuth = atob(url.username);
-                 const [cipher, password] = decodedAuth.split(':');
-                 if (url.hostname && url.port && cipher && password) {
-                     return { name: name || `${url.hostname}:${url.port}`, type: 'ss', server: url.hostname, port: parseInt(url.port), cipher, password, udp: true };
-                 }
-            }
+            // Case 2: URI scheme format
+            // ss://<auth>@<host>:<port>
+            else {
+                const atIndex = corePart.lastIndexOf('@');
+                const authPart = corePart.substring(0, atIndex);
+                const hostPart = corePart.substring(atIndex + 1);
+                let cipher, password;
 
+                try {
+                    // First, try decoding the auth part as base64
+                    const decodedAuth = atob(authPart);
+                    const colonIndex = decodedAuth.indexOf(':');
+                    if (colonIndex > 0) {
+                        cipher = decodedAuth.substring(0, colonIndex);
+                        password = decodedAuth.substring(colonIndex + 1);
+                    } else { throw new Error("Decoded auth part is invalid."); }
+                } catch (e) {
+                    // If base64 decoding fails, treat it as plain text `method:pass`
+                    const decodedAuth = decodeURIComponent(authPart);
+                    const colonIndex = decodedAuth.indexOf(':');
+                    if (colonIndex > 0) {
+                        cipher = decodedAuth.substring(0, colonIndex);
+                        password = decodedAuth.substring(colonIndex + 1);
+                    } else { throw new Error("Invalid plain text auth format."); }
+                }
+                
+                const hostColonIndex = hostPart.lastIndexOf(':');
+                if (hostColonIndex === -1) throw new Error("Invalid host part: missing port");
+                const server = hostPart.substring(0, hostColonIndex);
+                const port = hostPart.substring(hostColonIndex + 1);
+
+                if (server && port && cipher && password) {
+                    return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };
+                }
+            }
         } catch (e) {
             throw new Error(`SS link parsing failed: ${e.message}`);
         }
