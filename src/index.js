@@ -1,12 +1,11 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers! (提取修复最终版)
+ * 欢迎来到 Cloudflare Workers! (E2EE + 远程订阅代理最终版)
  * =================================================================================
  *
- * 【架构定型】:
- * 1. 【CORS支持】: 正确处理CORS预检请求(OPTIONS)，允许前端发送 `application/json` 类型的POST请求。
- * 2. 【纯粹的E2EE】: 此后端只负责存储和提取加密数据。所有明文处理逻辑和相关GET路由已被彻底移除。
- * 3. 【提取修复】: 修正了从R2获取对象后未正确提取其文本内容的逻辑错误。
+ * 【架构升级】:
+ * 1. 【远程订阅支持】: 新增 /proxy-fetch 接口，作为安全代理，用于在后端获取远程订阅内容，以绕过前端CORS限制。
+ * 2. 【纯粹的E2EE】: 核心的端到端加密模型保持不变，后端仅传递数据，不进行解析。
  */
 
 // =================================================================================
@@ -100,7 +99,7 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 });
 
 // =================================================================================
-// 提取路由: /extract (只返回加密数据) - 【已修复】
+// 提取路由: /extract (只返回加密数据)
 // =================================================================================
 router.post(/^\/extract$/, async ({ request, env }) => {
     try {
@@ -110,20 +109,17 @@ router.post(/^\/extract$/, async ({ request, env }) => {
         }
         
         const r2Key = `e2ee/${extractionCode}`;
-        
-        // 【重要修复】: 不再使用 { type: 'text' }，而是获取完整的 R2Object
         const object = await env.SUB_STORE.get(r2Key);
 
         if (object === null) {
             return new Response('提取码无效或链接已过期。', { status: 404, headers: corsHeaders });
         }
         
-        // 【重要修复】: 从 R2Object 中显式地调用 .text() 方法来获取其字符串内容
         const encryptedDataString = await object.text();
         
         return new Response(JSON.stringify({ 
             success: true, 
-            encryptedData: encryptedDataString, // 返回正确的字符串内容
+            encryptedData: encryptedDataString,
         }), {
             headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
@@ -133,6 +129,43 @@ router.post(/^\/extract$/, async ({ request, env }) => {
         return new Response(`An error occurred during extraction: ${e.message}`, { status: 500, headers: corsHeaders });
     }
 });
+
+// =================================================================================
+// 【新增】代理获取路由: /proxy-fetch - 用于安全地获取远程订阅
+// =================================================================================
+router.post(/^\/proxy-fetch$/, async ({ request }) => {
+    try {
+        const { url } = await request.json();
+        if (!url || !url.startsWith('http')) {
+            return new Response('A valid URL is required.', { status: 400, headers: corsHeaders });
+        }
+
+        // 伪装成浏览器User-Agent，防止一些网站拦截
+        const response = await fetch(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
+            }
+        });
+
+        if (!response.ok) {
+            return new Response(`Failed to fetch remote subscription. Status: ${response.status}`, { status: response.status, headers: corsHeaders });
+        }
+
+        const content = await response.text();
+
+        return new Response(content, {
+            headers: {
+                'Content-Type': 'text/plain;charset=utf-8',
+                ...corsHeaders
+            }
+        });
+
+    } catch (e) {
+        console.error('Proxy fetch error:', e);
+        return new Response(`An error occurred while fetching the remote subscription: ${e.message}`, { status: 500, headers: corsHeaders });
+    }
+});
+
 
 // =================================================================================
 // 静态资源服务 (Serving Static Assets)
