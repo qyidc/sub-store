@@ -148,39 +148,39 @@
    * 在您的本地项目代码的根目录下，创建 .github/workflows/ 文件夹结构。  
    * 在该文件夹中，创建一个新文件，名为 deploy.yml。  
    * 将以下内容**完整地**复制并粘贴到 deploy.yml 文件中：
-
-\# GitHub Actions 工作流名称  
+```
+# GitHub Actions 工作流名称  
 name: Deploy to Cloudflare
 
-\# 触发条件：当代码被推送到 main 分支时自动运行  
+# 触发条件：当代码被推送到 main 分支时自动运行  
 on:  
   push:  
     branches:  
-      \- main \# 您可以根据您的主分支名称修改，如 master
+      - main # 您可以根据您的主分支名称修改，如 master
 
 jobs:  
   deploy:  
     runs-on: ubuntu-latest  
     name: Deploy Worker and Static Assets  
     steps:  
-      \- name: Checkout  
+      - name: Checkout  
         uses: actions/checkout@v3
 
-      \- name: Deploy  
+      - name: Deploy  
         uses: cloudflare/wrangler-action@v3  
         with:  
-          apiToken: ${{ secrets.CLOUDFLARE\_API\_TOKEN }}  
-          accountId: ${{ secrets.CLOUDFLARE\_ACCOUNT\_ID }}  
-          \# 【核心命令】:   
-          \# 1\. \`wrangler deploy\` 会自动读取 wrangler.toml 并部署Worker脚本。  
-          \# 2\. \`wrangler r2 object put\` 会将静态文件上传到R2。  
-          \#    由于wrangler-action v3暂不支持直接上传整个目录，我们逐个上传核心文件。  
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}  
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}  
+          # 【核心命令】:   
+          # 1. `wrangler deploy` 会自动读取 wrangler.toml 并部署Worker脚本。  
+          # 2. `wrangler r2 object put` 会将静态文件上传到R2。  
+          #    由于wrangler-action v3暂不支持直接上传整个目录，我们逐个上传核心文件。  
           command: |  
             wrangler deploy &&   
-            wrangler r2 object put ${{ secrets.CLOUDFLARE\_R2\_BUCKET\_NAME }}/index.html \--file=public/index.html &&  
-            wrangler r2 object put ${{ secrets.CLOUDFLARE\_R2\_BUCKET\_NAME }}/script.js \--file=public/script.js &&  
-            wrangler r2 object put ${{ secrets.CLOUDFLARE\_R2\_BUCKET\_NAME }}/styles.css \--file=public/styles.css
-
+            wrangler r2 object put ${{ secrets.CLOUDFLARE_R2_BUCKET_NAME }}/index.html --file=public/index.html &&  
+            wrangler r2 object put ${{ secrets.CLOUDFLARE_R2_BUCKET_NAME }}/script.js --file=public/script.js &&  
+            wrangler r2 object put ${{ secrets.CLOUDFLARE_R2_BUCKET_NAME }}/styles.css --file=public/styles.css
+```
 3. **提交并推送代码**  
    * 将您修改过的 public/index.html (已填入站点密钥) 和新创建的 .github/workflows/deploy.yml 文件，通过 git 命令提交并推送到您的GitHub仓库的 main 分支。  
    * 推送后，您可以进入GitHub仓库的 **Actions** 标签页，查看工作流是否正在运行。  
