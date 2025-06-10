@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     // #################################################################################
-    //                          协议解析与配置生成模块 (终极修复版)
+    //                          协议解析与配置生成模块 (最终修复版)
     // #################################################################################
     
     /**
@@ -161,12 +161,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             for (const line of lines) {
                 try {
-                    // 【重要】只处理非http链接，因为E2EE模式下前端无法获取远程订阅
                     if (line.startsWith('http')) {
-                        parsingErrors.push(`- 远程订阅链接 (${line.substring(0, 30)}...) 在安全模式下不支持直接解析。`);
+                        parsingErrors.push(`- 远程订阅 (${line.substring(0, 30)}...) 在安全模式下不支持。`);
                         continue;
                     }
-
                     const proxies = parseShareLink(line);
                     if (proxies && proxies.length > 0) {
                         const validProxies = proxies.filter(p => p);
@@ -174,9 +172,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             allProxies.push(...validProxies);
                             allShareLinks.push(line);
                         } else {
-                            // This case means parseShareLink returned [null] or similar
-                             parsingErrors.push(`- 无法识别的链接格式: "${line.substring(0, 40)}..."`);
+                             parsingErrors.push(`- 无法识别的格式: "${line.substring(0, 40)}..."`);
                         }
+                    } else if (line.trim()) {
+                        parsingErrors.push(`- 不支持的类型: "${line.substring(0, 40)}..."`);
                     }
                 } catch (e) {
                     parsingErrors.push(`- "${line.substring(0, 40)}...": ${e.message}`);
@@ -334,7 +333,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let errorTimeout;
     function showError(message) {
         clearTimeout(errorTimeout);
-        // 【升级】: 使用innerHTML来支持换行<br>
         const formattedMessage = String(message).replace(/\n/g, '<br>');
         errorText.innerHTML = formattedMessage;
         errorMessage.classList.remove('hidden', 'opacity-0');
