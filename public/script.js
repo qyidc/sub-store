@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     // --- Part 1: Conversion Elements ---
-    const conversionForm = document.getElementById('conversion-form'); // 【升级】获取form元素
+    const conversionForm = document.getElementById('conversion-form');
     const subInput = document.getElementById('sub-input');
     const expirationSelect = document.getElementById('expiration-select');
     const convertBtn = document.getElementById('convert-btn');
@@ -31,21 +31,18 @@ document.addEventListener('DOMContentLoaded', () => {
     conversionForm.addEventListener('submit', async (event) => {
         event.preventDefault(); // 阻止浏览器默认的页面刷新行为
 
-        // 【升级】使用 FormData API 来可靠地获取所有表单数据
         const formData = new FormData(conversionForm);
-        const inputData = formData.get('subscription_data');
+        const inputData = formData.get('subscription_data').trim();
         const expirationDays = formData.get('expirationDays');
         const turnstileToken = formData.get('cf-turnstile-response');
 
-        if (!inputData || inputData.trim() === '') {
+        if (!inputData) {
             showError('订阅链接或分享链接不能为空。');
             return;
         }
         
         if (!turnstileToken) {
-            showError('请先完成人机验证。如果看不到验证模块，请刷新页面。');
-            // 注意：在实际情况中，由于表单提交，这个错误很难触发，
-            // 因为Turnstile通常会阻止没有令牌的表单提交。但保留作为保险。
+            showError('请等待人机验证完成。如果看不到验证模块，请刷新页面。');
             return;
         }
 
@@ -83,14 +80,13 @@ document.addEventListener('DOMContentLoaded', () => {
             showError(error.message);
         } finally {
             setLoading(convertBtn, convertLoader, convertBtnText, false);
-            // 无论成功或失败，都重置Turnstile小组件，以便用户可以再次提交
             if (typeof turnstile !== 'undefined' && turnstileWidget) {
                 turnstile.reset(turnstileWidget);
             }
         }
     });
 
-    // 2. Extraction Logic - (no change needed)
+    // 2. Extraction Logic
     extractBtn.addEventListener('click', async() => {
         const extractionCode = extractCodeInput.value.trim();
         if (!extractionCode) {
