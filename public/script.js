@@ -20,58 +20,62 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * Parses Shadowsocks (SS) links. Handles both SIP002 and URI formats robustly.
+     * 【终极修复版】: Parses Shadowsocks (SS) links. Handles both SIP002 and URI formats robustly.
      * @param {string} link The ss:// link.
      * @returns {Object|null} A proxy object or null if parsing fails.
      */
     function parseShadowsocks(link) {
         try {
+            if (!link.startsWith("ss://")) {
+                throw new Error("Invalid SS link prefix");
+            }
+
             const hashIndex = link.indexOf('#');
             const name = hashIndex > -1 ? decodeURIComponent(link.substring(hashIndex + 1)) : null;
             const corePart = hashIndex > -1 ? link.substring(5, hashIndex) : link.substring(5);
 
             // Case 1: SIP002 format where the core is a single base64 string
             // ss://<base64(method:password@server:port)>#<tag>
+            // This is the most common format and might use URL-safe base64.
             if (corePart.indexOf('@') === -1) {
-                const decoded = atob(corePart);
+                // 【核心修复】: 使用我们自己的 b64UrlDecode 函数，以兼容标准和URL-safe两种Base64编码。
+                const decoded = b64UrlDecode(corePart);
+                if (!decoded) throw new Error("SIP002 core part is not valid Base64.");
+                
                 const atIndex = decoded.lastIndexOf('@');
-                if (atIndex === -1) throw new Error("Invalid SIP002 format: missing '@'");
+                if (atIndex === -1) throw new Error("Invalid SIP002 format: missing '@' after decoding.");
+                
                 const authPart = decoded.substring(0, atIndex);
                 const hostPart = decoded.substring(atIndex + 1);
+                
                 const [cipher, password] = authPart.split(':');
                 const [server, port] = hostPart.split(':');
+
                 if (server && port && cipher && password) {
                     return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };
                 }
             }
-            // Case 2: URI scheme format
-            // ss://<auth>@<host>:<port>
+            // Case 2: URI scheme format, common with V2RayN
+            // ss://<base64(method:password)>@<host>:<port>
             else {
                 const atIndex = corePart.lastIndexOf('@');
-                const authPart = corePart.substring(0, atIndex);
+                const authPartB64 = corePart.substring(0, atIndex);
                 const hostPart = corePart.substring(atIndex + 1);
                 let cipher, password;
 
-                try {
-                    // First, try decoding the auth part as base64
-                    const decodedAuth = atob(authPart);
-                    const colonIndex = decodedAuth.indexOf(':');
-                    if (colonIndex > 0) {
-                        cipher = decodedAuth.substring(0, colonIndex);
-                        password = decodedAuth.substring(colonIndex + 1);
-                    } else { throw new Error("Decoded auth part is invalid."); }
-                } catch (e) {
-                    // If base64 decoding fails, treat it as plain text `method:pass`
-                    const decodedAuth = decodeURIComponent(authPart);
-                    const colonIndex = decodedAuth.indexOf(':');
-                    if (colonIndex > 0) {
-                        cipher = decodedAuth.substring(0, colonIndex);
-                        password = decodedAuth.substring(colonIndex + 1);
-                    } else { throw new Error("Invalid plain text auth format."); }
+                // The auth part is usually standard Base64 in this format.
+                const decodedAuth = atob(authPartB64);
+                const colonIndex = decodedAuth.indexOf(':');
+                if (colonIndex > 0) {
+                    cipher = decodedAuth.substring(0, colonIndex);
+                    password = decodedAuth.substring(colonIndex + 1);
+                } else {
+                    throw new Error("Decoded auth part is invalid.");
                 }
                 
                 const hostColonIndex = hostPart.lastIndexOf(':');
                 if (hostColonIndex === -1) throw new Error("Invalid host part: missing port");
+
                 const server = hostPart.substring(0, hostColonIndex);
                 const port = hostPart.substring(hostColonIndex + 1);
 
