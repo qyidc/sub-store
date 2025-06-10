@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     // #################################################################################
-    //                          协议解析与配置生成模块 (最终修复版)
+    //                          协议解析与配置生成模块 (终极修复版)
     // #################################################################################
     
     /**
@@ -26,12 +26,11 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function parseShadowsocks(link) {
         try {
-            // Attempt to parse as a standard URL first (for formats like ss://YWVzLTEyOC1nY206cGFzc3dvcmQ=@host:port#tag)
+            // 1. 尝试标准URL格式: ss://<auth>@<host>:<port>#<tag>
             const url = new URL(link);
             const name = decodeURIComponent(url.hash.substring(1)) || `${url.hostname}:${url.port}`;
             let cipher, password;
 
-            // The authentication part (url.username) is typically Base64 encoded.
             if (url.username) {
                 try {
                     const decodedAuth = atob(url.username);
@@ -39,49 +38,43 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (colonIndex > -1) {
                         cipher = decodedAuth.substring(0, colonIndex);
                         password = decodedAuth.substring(colonIndex + 1);
-                    } else {
-                        throw new Error("Invalid auth format");
-                    }
+                    } else { throw new Error("Invalid base64 auth format"); }
                 } catch (e) {
-                    // Fallback if not base64, though less common.
-                    const authParts = url.username.split(':');
-                     if (authParts.length >= 2) {
+                    const authParts = decodeURIComponent(url.username).split(':');
+                    if (authParts.length >= 2) {
                         cipher = authParts[0];
                         password = authParts.slice(1).join(':');
-                    } else {
-                        throw new Error("Invalid auth format");
-                    }
+                    } else { throw new Error("Invalid plain auth format"); }
                 }
+            } else if (link.includes('@')) { // 兼容 ss://method:pass@host:port#tag
+                 const atIndex = link.indexOf('@');
+                 const b64part = link.substring(5, atIndex);
+                 const decodedAuth = atob(b64part);
+                 const colonIndex = decodedAuth.indexOf(':');
+                 if(colonIndex > -1) {
+                    cipher = decodedAuth.substring(0, colonIndex);
+                    password = decodedAuth.substring(colonIndex + 1);
+                 }
+            } else {
+                 throw new Error("Auth part not found");
             }
-            
+
             if (url.hostname && url.port && cipher && password) {
                 return { name, type: 'ss', server: url.hostname, port: parseInt(url.port, 10), cipher, password, udp: true };
             }
         } catch (e) {
-            // If standard URL parsing fails, it's likely the SIP002 format: ss://<base64>#<tag>
+            // 2. 尝试SIP002格式: ss://<base64(method:password@server:port)>#<tag>
             try {
                 const parts = link.substring(5).split('#');
                 const b64part = parts[0];
                 const name = parts[1] ? decodeURIComponent(parts[1]) : null;
-
                 const decoded = atob(b64part);
                 const atIndex = decoded.lastIndexOf('@');
-                if (atIndex === -1) throw new Error("Invalid SIP002 format: missing '@'");
-
+                if (atIndex === -1) throw new Error("Invalid SIP002: missing '@'");
                 const authPart = decoded.substring(0, atIndex);
                 const hostPart = decoded.substring(atIndex + 1);
-
-                const colonIndex = authPart.indexOf(':');
-                if (colonIndex === -1) throw new Error("Invalid SIP002 auth part");
-
-                const cipher = authPart.substring(0, colonIndex);
-                const password = authPart.substring(colonIndex + 1);
-                
-                const hostColonIndex = hostPart.lastIndexOf(':');
-                if (hostColonIndex === -1) throw new Error("Invalid SIP002 host part");
-
-                const server = hostPart.substring(0, hostColonIndex);
-                const port = hostPart.substring(hostColonIndex + 1);
+                const [cipher, password] = authPart.split(':');
+                const [server, port] = hostPart.split(':');
 
                 if (server && port && cipher && password) {
                     return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };
@@ -90,9 +83,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(`SS link parsing failed: ${e2.message}`);
             }
         }
-        
         throw new Error("Could not parse SS link in any known format.");
     }
+
 
     /**
      * Parses ShadowsocksR (SSR) links.
@@ -107,28 +100,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (requiredParts.length < 6) throw new Error("Invalid SSR main part");
 
             const [server, port, protocol, cipher, obfs, password_b64] = requiredParts;
-            
             const paramsStr = mainParts.length > 1 ? mainParts[1] : '';
             const params = new URLSearchParams(paramsStr);
-
             const name = params.get('remarks') ? b64UrlDecode(params.get('remarks')) : `${server}:${port}`;
             const password = b64UrlDecode(password_b64);
             const obfsParam = params.get('obfsparam') ? b64UrlDecode(params.get('obfsparam')) : '';
             const protoParam = params.get('protoparam') ? b64UrlDecode(params.get('protoparam')) : '';
 
-            return {
-                name: name,
-                type: 'ssr',
-                server: server,
-                port: parseInt(port, 10),
-                cipher: cipher,
-                password: password,
-                protocol: protocol,
-                'protocol-param': protoParam,
-                obfs: obfs,
-                'obfs-param': obfsParam,
-                udp: true
-            };
+            return { name, type: 'ssr', server, port: parseInt(port, 10), cipher, password, protocol, 'protocol-param': protoParam, obfs, 'obfs-param': obfsParam, udp: true };
         } catch (e) {
             throw new Error(`SSR link parsing failed: ${e.message}`);
         }
@@ -182,12 +161,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
             for (const line of lines) {
                 try {
+                    // 【重要】只处理非http链接，因为E2EE模式下前端无法获取远程订阅
+                    if (line.startsWith('http')) {
+                        parsingErrors.push(`- 远程订阅链接 (${line.substring(0, 30)}...) 在安全模式下不支持直接解析。`);
+                        continue;
+                    }
+
                     const proxies = parseShareLink(line);
                     if (proxies && proxies.length > 0) {
                         const validProxies = proxies.filter(p => p);
                         if (validProxies.length > 0) {
                             allProxies.push(...validProxies);
                             allShareLinks.push(line);
+                        } else {
+                            // This case means parseShareLink returned [null] or similar
+                             parsingErrors.push(`- 无法识别的链接格式: "${line.substring(0, 40)}..."`);
                         }
                     }
                 } catch (e) {
@@ -196,9 +184,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (allProxies.length === 0) {
-                let finalMessage = "未找到有效的代理节点。";
+                let finalMessage = "未找到任何可解析的有效代理节点。";
                 if (parsingErrors.length > 0) {
-                    finalMessage += "\n\n以下链接解析失败:\n" + parsingErrors.join('\n');
+                    finalMessage += "\n\n解析详情如下:\n" + parsingErrors.join('\n');
                 } else {
                     finalMessage += " 请检查您输入的链接。";
                 }
@@ -353,8 +341,8 @@ document.addEventListener('DOMContentLoaded', () => {
         errorMessage.classList.add('opacity-100');
         errorTimeout = setTimeout(() => {
             errorMessage.classList.add('opacity-0');
-            setTimeout(() => errorMessage.classList.add('hidden'), 300);
-        }, 8000); // 延长显示时间以便阅读多行错误
+            setTimeout(() => errorMessage.classList.add('hidden'), 8000);
+        }, 8000); 
     }
     function hideError() {
         errorMessage.classList.add('hidden', 'opacity-0');
