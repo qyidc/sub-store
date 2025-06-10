@@ -1,13 +1,40 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers! (端到端加密最终版)
+ * 欢迎来到 Cloudflare Workers! (端到端加密 + CORS修复版)
  * =================================================================================
  *
- * 【架构升级】:
- * 1. 【端到端加密】: 此后端不再处理任何明文数据。所有解析、生成、加密、解密操作均在前端完成。
- * 2. 【角色简化】: 后端的核心职责简化为“加密数据存储管理员”。
- * 3. 【零信任】: 服务器无法读取用户数据，最大限度保障用户隐私。
+ * 【核心升级】:
+ * 1. 【CORS修复】: 新增了对CORS预检请求(OPTIONS)的处理，允许前端发送 `application/json` 类型的POST请求。
+ * 2. 【响应头增强】: 为所有API响应添加了 `Access-Control-Allow-Origin` 头，确保浏览器能正常接收数据。
  */
+
+// =================================================================================
+// 【新增】CORS 预检请求处理函数
+// =================================================================================
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
+function handleOptions(request) {
+  // 确保这是一个有效的CORS预检请求
+  if (
+    request.headers.get('Origin') !== null &&
+    request.headers.get('Access-Control-Request-Method') !== null &&
+    request.headers.get('Access-Control-Request-Headers') !== null
+  ) {
+    // 直接返回带有允许策略的响应头
+    return new Response(null, { headers: corsHeaders });
+  } else {
+    // 处理标准的OPTIONS请求
+    return new Response(null, {
+      headers: {
+        Allow: 'GET, POST, OPTIONS',
+      },
+    });
+  }
+}
 
 // =================================================================================
 // 路由模块 (Simple Router)
@@ -16,6 +43,11 @@ const Router = () => {
 	const routes = [];
 	const add = (method, path, handler) => routes.push({ method, path, handler });
 	const handle = async (request, env, ctx) => {
+        // 【新增】在处理任何路由之前，先处理OPTIONS请求
+        if (request.method === 'OPTIONS') {
+            return handleOptions(request);
+        }
+
 		const url = new URL(request.url);
 		for (const route of routes) {
 			if (request.method !== route.method) continue;
@@ -25,8 +57,6 @@ const Router = () => {
 				return await route.handler({ request, params, url, env, ctx });
 			}
 		}
-		// 【重要】: 对于E2EE架构，后端不再需要 /sub, /download, /generic 等GET路由，
-		// 因为所有文件内容都在前端解密和处理。我们只保留静态资源服务。
 		if (request.method === 'GET') {
 			return serveStaticAsset({ request, env });
 		}
@@ -52,7 +82,7 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 			return new Response('Missing extraction code or encrypted data.', { status: 400 });
 		}
 
-        const r2Key = `e2ee/${extractionCode}`; // 使用特定前缀以区分
+        const r2Key = `e2ee/${extractionCode}`;
         
         const days = parseInt(expirationDays);
         let expiration;
@@ -63,12 +93,15 @@ router.post(/^\/convert$/, async ({ request, env }) => {
         }
 
 		await env.SUB_STORE.put(r2Key, encryptedData, {
-            httpMetadata: { contentType: 'application/octet-stream' }, // 存储为二进制流
+            httpMetadata: { contentType: 'application/octet-stream' },
             expires: expiration,
         });
 
 		return new Response(JSON.stringify({ success: true }), {
-			headers: { 'Content-Type': 'application/json' },
+			headers: { 
+                'Content-Type': 'application/json',
+                ...corsHeaders // 【新增】为响应添加CORS头
+            },
 		});
 
 	} catch (error) {
@@ -94,12 +127,14 @@ router.post(/^\/extract$/, async ({ request, env }) => {
             return new Response('提取码无效或链接已过期。', { status: 404 });
         }
         
-        // 原封不动地返回加密后的数据
         return new Response(JSON.stringify({ 
             success: true, 
             encryptedData: object,
         }), {
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                ...corsHeaders // 【新增】为响应添加CORS头
+            },
         });
 
     } catch (e) {
@@ -134,5 +169,3 @@ export default {
 		return router.handle(request, env, ctx);
 	},
 };
-
-// 【注意】: 所有的解析和生成逻辑都已从后端移除，并迁移至前端的 script.js 文件中。
