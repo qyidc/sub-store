@@ -1,20 +1,20 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers! (纯粹的端到端加密最终版)
+ * 欢迎来到 Cloudflare Workers! (端到端加密 + 人机验证最终版)
  * =================================================================================
  *
  * 【架构定型】:
- * 1. 【纯粹的E2EE】: 此后端只负责存储和提取加密数据。所有明文处理逻辑和相关GET路由已被彻底移除。
- * 2. 【角色明确】: 后端是“零知识”的仓库管理员，前端是“全能”的安全处理器。
- * 3. 【TTL机制】: 通过`expires`属性为R2对象设置生命周期，Cloudflare将在后台定期清理过期对象。
+ * 1. 【CORS修复】: 正确处理CORS预检请求(OPTIONS)，允许前端发送 `application/json` 类型的POST请求。
+ * 2. 【人机验证】: /convert 接口现在会验证前端提交的Cloudflare Turnstile令牌。
+ * 3. 【纯粹的E2EE】: 此后端只负责存储和提取加密数据。所有明文处理逻辑已被移除。
  */
 
 // =================================================================================
-// CORS 预检请求处理模块
+// CORS 和 Turnstile 验证模块
 // =================================================================================
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS', // 只允许POST和OPTIONS
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
@@ -30,8 +30,26 @@ function handleOptions(request) {
   }
 }
 
+async function verifyTurnstileToken(token, secret, remoteip) {
+    if (!secret) {
+        console.warn("Turnstile secret (TURNSTILE_SECRET) is not set. Skipping verification for development.");
+        return true; 
+    }
+    const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            secret: secret,
+            response: token,
+            remoteip: remoteip,
+        }),
+    });
+    const data = await response.json();
+    return data.success;
+}
+
 // =================================================================================
-// 路由模块 (极简版)
+// 路由模块 (Simple Router)
 // =================================================================================
 const Router = () => {
 	const routes = [];
@@ -51,7 +69,6 @@ const Router = () => {
 			}
 		}
 		
-        // 所有GET请求都视为静态资源请求
 		if (request.method === 'GET') {
 			return serveStaticAsset({ request, env });
 		}
@@ -72,7 +89,18 @@ const router = Router();
 // =================================================================================
 router.post(/^\/convert$/, async ({ request, env }) => {
 	try {
-		const { extractionCode, encryptedData, expirationDays } = await request.json();
+        // 【重要】: 请求体现在包含了turnstileToken
+		const { extractionCode, encryptedData, expirationDays, turnstileToken } = await request.json();
+
+        // 【新增】: 人机验证检查
+        if (!turnstileToken) {
+            return new Response('缺少人机验证令牌。', { status: 403, headers: corsHeaders });
+        }
+        const userIp = request.headers.get('CF-Connecting-IP');
+        const isHuman = await verifyTurnstileToken(turnstileToken, env.TURNSTILE_SECRET, userIp);
+        if (!isHuman) {
+            return new Response('人机验证失败。', { status: 403, headers: corsHeaders });
+        }
 
 		if (!extractionCode || !encryptedData) {
 			return new Response('Missing extraction code or encrypted data.', { status: 400, headers: corsHeaders });
