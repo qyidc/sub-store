@@ -1,19 +1,62 @@
-/* Custom styles can go here if needed */
-/* For example, to add a subtle background pattern */
+/*
+ * =================================================================================
+ * Custom Stylesheet for Universal Subscription Converter
+ * =================================================================================
+ *
+ * This file contains custom CSS rules that complement the Tailwind CSS utility classes.
+ * It's used for base styles, custom animations, and component-specific styles
+ * that are difficult or verbose to achieve with Tailwind alone.
+ *
+ */
+
+/* * 1. Base Body Styles
+ * -------------------
+ * We apply some basic styles to the body for a smoother font rendering experience
+ * across different browsers and operating systems.
+ */
 body {
-    transition: background-color 0.3s ease;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom transition for result area */
-#result-area {
-    transition: opacity 0.5s ease-in-out, transform 0.3s ease-in-out;
+/*
+ * 2. Custom Keyframe Animations
+ * -----------------------------
+ * Here we define custom animations used in the application.
+ */
+
+/* Animation for the error message popup */
+@keyframes slide-in-from-bottom {
+    0% {
+        transform: translateY(100%);
+        opacity: 0;
+    }
+    100% {
+        transform: translateY(0);
+        opacity: 1;
+    }
 }
 
-/* Ensure the loader icon is centered inside the button */
-#convert-btn.is-loading #btn-text {
-    display: none;
+/*
+ * 3. Custom Component Styles
+ * --------------------------
+ * Applying our custom animations and other specific styles to components.
+ */
+
+/* Style for the universal error message area */
+#error-message {
+    /*
+     * We can still use Tailwind classes in our CSS file with the @apply directive
+     * if we have a build process. But since we are using the CDN, we'll write plain CSS.
+     * The following animation property makes the error message slide in smoothly.
+     */
+    animation: slide-in-from-bottom 0.3s ease-out forwards;
 }
 
-#convert-btn.is-loading #loader {
-    display: block;
+/* * A simple enhancement for copy buttons to provide visual feedback.
+ * This can be expanded with more complex animations if needed.
+ */
+.copy-btn:active {
+    transform: scale(0.95);
+    transition: transform 0.1s ease-in-out;
 }
