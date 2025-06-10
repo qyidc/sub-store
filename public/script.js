@@ -1,10 +1,131 @@
 document.addEventListener('DOMContentLoaded', () => {
     // #################################################################################
-    //                          协议解析与配置生成模块 (已迁移至前端)
+    //                          协议解析与配置生成模块 (最终修复版)
     // #################################################################################
-    function b64UrlDecode(str) {try {str = str.replace(/-/g, '+').replace(/_/g, '/');while (str.length % 4) { str += '='; }return atob(str);} catch(e) {console.error("Base64URL Decode Failed:", e);return "";}}
-    function parseShadowsocks(link) {try {const url = new URL(link);const name = decodeURIComponent(url.hash).substring(1) || `${url.hostname}:${url.port}`;let cipher, password;try {const decodedAuth = atob(url.username);const authParts = decodedAuth.split(':');if (authParts.length >= 2) {cipher = authParts[0];password = authParts.slice(1).join(':');}} catch (e) {cipher = url.username;password = url.password;}if (url.hostname && url.port && cipher && password) {return { name, type: 'ss', server: url.hostname, port: parseInt(url.port, 10), cipher, password, udp: true };}} catch (e) {}try {const parts = link.substring(5).split('#');const decoded = atob(parts[0]);const name = parts[1] ? decodeURIComponent(parts[1]) : null;const atIndex = decoded.lastIndexOf('@');if (atIndex === -1) return null;const authPart = decoded.substring(0, atIndex);const hostPart = decoded.substring(atIndex + 1);const [cipher, password] = authPart.split(':');const [server, port] = hostPart.split(':');if (server && port && cipher && password) {return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };}} catch (e) {console.error("Failed to parse SS link in any known format:", link, e);}return null;}
-    function parseShadowsocksR(link) {try {const decoded = b64UrlDecode(link.substring('ssr://'.length));const mainParts = decoded.split('/?');const [server, port, protocol, cipher, obfs, password_b64] = mainParts[0].split(':');const params = new URLSearchParams(mainParts[1] || '');return {name: params.get('remarks') ? b64UrlDecode(params.get('remarks')) : `${server}:${port}`,type: 'ssr',server: server,port: parseInt(port, 10),cipher: cipher,password: b64UrlDecode(password_b64),protocol: protocol,'protocol-param': params.get('protoparam') ? b64UrlDecode(params.get('protoparam')) : '',obfs: obfs,'obfs-param': params.get('obfsparam') ? b64UrlDecode(params.get('obfsparam')) : '',udp: true};} catch (e) {console.error("Failed to parse SSR link:", link, e);return null;}}
+    
+    /**
+     * Decodes a base64-url string, common in SSR links.
+     * @param {string} str The base64-url string.
+     * @returns {string} The decoded string.
+     */
+    function b64UrlDecode(str) {
+        try {
+            str = str.replace(/-/g, '+').replace(/_/g, '/');
+            while (str.length % 4) { str += '='; }
+            return atob(str);
+        } catch(e) {
+            console.error("Base64URL Decode Failed for string:", str, e);
+            return "";
+        }
+    }
+
+    /**
+     * Parses Shadowsocks (SS) links. Handles both SIP002 and URI formats robustly.
+     * @param {string} link The ss:// link.
+     * @returns {Object|null} A proxy object or null if parsing fails.
+     */
+    function parseShadowsocks(link) {
+        try {
+            // Attempt to parse as a standard URL first (for formats like ss://YWVzLTEyOC1nY206cGFzc3dvcmQ=@host:port#tag)
+            const url = new URL(link);
+            const name = decodeURIComponent(url.hash.substring(1)) || `${url.hostname}:${url.port}`;
+            let cipher, password;
+
+            // The authentication part (url.username) is typically Base64 encoded.
+            if (url.username) {
+                try {
+                    const decodedAuth = atob(url.username);
+                    const colonIndex = decodedAuth.indexOf(':');
+                    if (colonIndex > -1) {
+                        cipher = decodedAuth.substring(0, colonIndex);
+                        password = decodedAuth.substring(colonIndex + 1);
+                    }
+                } catch (e) {
+                    // Fallback if not base64, though less common.
+                    cipher = url.username;
+                    password = url.password;
+                }
+            }
+            
+            if (url.hostname && url.port && cipher && password) {
+                return { name, type: 'ss', server: url.hostname, port: parseInt(url.port, 10), cipher, password, udp: true };
+            }
+        } catch (e) {
+            // If standard URL parsing fails, it's likely the SIP002 format: ss://<base64>#<tag>
+            try {
+                const parts = link.substring(5).split('#');
+                const b64part = parts[0];
+                const name = parts[1] ? decodeURIComponent(parts[1]) : null;
+
+                const decoded = atob(b64part);
+                const atIndex = decoded.lastIndexOf('@');
+                if (atIndex === -1) return null;
+
+                const authPart = decoded.substring(0, atIndex);
+                const hostPart = decoded.substring(atIndex + 1);
+
+                const colonIndex = authPart.indexOf(':');
+                if (colonIndex === -1) return null;
+
+                const cipher = authPart.substring(0, colonIndex);
+                const password = authPart.substring(colonIndex + 1);
+                
+                const hostColonIndex = hostPart.lastIndexOf(':');
+                if (hostColonIndex === -1) return null;
+
+                const server = hostPart.substring(0, hostColonIndex);
+                const port = hostPart.substring(hostColonIndex + 1);
+
+                if (server && port && cipher && password) {
+                    return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };
+                }
+            } catch (e2) {
+                // This block will catch errors if the format is truly invalid
+            }
+        }
+        
+        console.error("Could not parse SS link in any known format:", link);
+        return null;
+    }
+
+    /**
+     * Parses ShadowsocksR (SSR) links.
+     * @param {string} link The ssr:// link.
+     * @returns {Object|null} A proxy object or null if parsing fails.
+     */
+    function parseShadowsocksR(link) {
+        try {
+            const decoded = b64UrlDecode(link.substring('ssr://'.length));
+            const mainParts = decoded.split('/?');
+            const [server, port, protocol, cipher, obfs, password_b64] = mainParts[0].split(':');
+            
+            const paramsStr = mainParts.length > 1 ? mainParts[1] : '';
+            const params = new URLSearchParams(paramsStr);
+
+            const name = params.get('remarks') ? b64UrlDecode(params.get('remarks')) : `${server}:${port}`;
+            const password = b64UrlDecode(password_b64);
+            const obfsParam = params.get('obfsparam') ? b64UrlDecode(params.get('obfsparam')) : '';
+            const protoParam = params.get('protoparam') ? b64UrlDecode(params.get('protoparam')) : '';
+
+            return {
+                name: name,
+                type: 'ssr',
+                server: server,
+                port: parseInt(port, 10),
+                cipher: cipher,
+                password: password,
+                protocol: protocol,
+                'protocol-param': protoParam,
+                obfs: obfs,
+                'obfs-param': obfsParam,
+                udp: true
+            };
+        } catch (e) {
+            console.error("Failed to parse SSR link:", link, e);
+            return null;
+        }
+    }
+
     function parseShareLink(link) {if (!link) return [];try {let decodedLink = link;if (!link.includes('://') && (link.length % 4 === 0) && /^[a-zA-Z0-9+/]*={0,2}$/.test(link)) {try { decodedLink = atob(link); } catch (e) { /* ignore */ }}if (decodedLink.startsWith('ss://')) return [parseShadowsocks(decodedLink)];if (decodedLink.startsWith('ssr://')) return [parseShadowsocksR(decodedLink)];if (decodedLink.startsWith('vless://')) return [parseVless(decodedLink)];if (decodedLink.startsWith('vmess://')) return [parseVmess(decodedLink)];if (decodedLink.startsWith('trojan://')) return [parseTrojan(decodedLink)];if (decodedLink.startsWith('tuic://')) return [parseTuic(decodedLink)];if (decodedLink.startsWith('hysteria2://')) return [parseHysteria2(decodedLink)];} catch (error) {console.warn(`Skipping invalid link: ${link.substring(0, 40)}...`, error.message);return [];}return [];}
     function parseVless(link) {try {const url = new URL(link);const params = url.searchParams;const proxy = {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'vless',server: url.hostname,port: parseInt(url.port, 10),uuid: url.username,network: params.get('type') || 'tcp',tls: params.get('security') === 'tls' || params.get('security') === 'reality',udp: true,flow: params.get('flow') || '','client-fingerprint': params.get('fp') || 'chrome',};if (proxy.tls) {proxy.servername = params.get('sni') || url.hostname;proxy.alpn = params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"];if (params.get('security') === 'reality') {proxy['reality-opts'] = { 'public-key': params.get('pbk'), 'short-id': params.get('sid') };}}if (proxy.network === 'ws') proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || url.hostname } };if (proxy.network === 'grpc') proxy['grpc-opts'] = { 'grpc-service-name': params.get('serviceName') || '' };return proxy;} catch(e) { console.error("Failed to parse VLESS link:", link, e); return null; } }
     function parseVmess(link) {try {const jsonStr = atob(link.substring('vmess://'.length));const config = JSON.parse(jsonStr);return {name: config.ps || config.add, type: 'vmess', server: config.add, port: parseInt(config.port, 10),uuid: config.id, alterId: config.aid, cipher: config.scy || 'auto',tls: config.tls === 'tls', network: config.net || 'tcp', udp: true,servername: config.sni || undefined,'ws-opts': config.net === 'ws' ? { path: config.path || '/', headers: { Host: config.host || config.add } } : undefined,'h2-opts': config.net === 'h2' ? { path: config.path || '/', host: [config.host || config.add] } : undefined,'grpc-opts': config.net === 'grpc' ? { 'grpc-service-name': config.path || ''} : undefined,};} catch(e) { console.error("Failed to parse VMess link:", link, e); return null; } }
