@@ -1,0 +1,41 @@
+# GitHub Actions 工作流名称
+name: Deploy to Cloudflare
+
+# 触发条件：当代码被推送到 main 分支时自动运行
+on:
+  push:
+    branches:
+      - main  # 您可以根据您的主分支名称修改，如 master
+
+jobs:
+  deploy:
+    # 运行环境：使用最新的Ubuntu系统
+    runs-on: ubuntu-latest
+    name: Deploy
+    steps:
+      # 第一步：检出代码
+      # 将您的GitHub仓库代码下载到工作流的虚拟环境中
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      # 第二步：部署Worker脚本和静态资源
+      # 使用官方的Wrangler Action，它集成了所有必要工具
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          # 使用我们在GitHub Secrets中配置的API令牌
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # 使用我们在GitHub Secrets中配置的账户ID
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # 指定wrangler.toml文件所在的目录（如果是根目录，则不需要此行）
+          # workingDirectory: 'my-worker' 
+          
+          # 【核心命令】: 
+          # 1. `wrangler deploy` 会自动读取 wrangler.toml 并部署Worker脚本。
+          # 2. `wrangler r2 bucket upload` 会将静态文件上传到R2。
+          #    - `--bucket`: 指定要上传到的R2存储桶名称，我们从Secret中读取。
+          #    - `public`: 这是您存放 index.html, script.js, styles.css 的文件夹名称。
+          #    - `--destination-path /`: 表示将public文件夹的内容上传到存储桶的根目录。
+          command: |
+            wrangler deploy && 
+            wrangler r2 bucket upload public --bucket=${{ secrets.CLOUDFLARE_R2_BUCKET_NAME }} --destination-path /
