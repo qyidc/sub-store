@@ -3,9 +3,109 @@ document.addEventListener('DOMContentLoaded', () => {
     //                          协议解析与配置生成模块 (最终修复版)
     // #################################################################################
     
-    function b64UrlDecode(str) {try {str = str.replace(/-/g, '+').replace(/_/g, '/');while (str.length % 4) { str += '='; }return atob(str);} catch(e) {console.error("Base64URL Decode Failed for string:", str, e);return "";}}
-    function parseShadowsocks(link) {try {if (!link.startsWith("ss://")) throw new Error("Not an SS link");const hashIndex = link.indexOf('#');const name = hashIndex > -1 ? decodeURIComponent(link.substring(hashIndex + 1)) : null;const mainPart = hashIndex > -1 ? link.substring(5, hashIndex) : link.substring(5);const atIndex = mainPart.indexOf('@');if (atIndex > -1) {const authPart = mainPart.substring(0, atIndex);const hostPart = mainPart.substring(atIndex + 1);let cipher, password;try {const decodedAuth = atob(authPart);const colonIndex = decodedAuth.indexOf(':');if (colonIndex > -1) {cipher = decodedAuth.substring(0, colonIndex);password = decodedAuth.substring(colonIndex + 1);}} catch (e) {const authParts = decodeURIComponent(authPart).split(':');if (authParts.length >= 2) {cipher = authParts[0];password = authParts.slice(1).join(':');}}const hostColonIndex = hostPart.lastIndexOf(':');const server = hostPart.substring(0, hostColonIndex);const port = hostPart.substring(hostColonIndex + 1);if (server && port && cipher && password) return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };} else {const decoded = atob(mainPart);const atIndex = decoded.lastIndexOf('@');if (atIndex === -1) throw new Error("Invalid SIP002: missing '@'");const authPart = decoded.substring(0, atIndex);const hostPart = decoded.substring(atIndex + 1);const [cipher, password] = authPart.split(':');const [server, port] = hostPart.split(':');if (server && port && cipher && password) return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };}} catch (e) {throw new Error(`SS link parsing failed: ${e.message}`);}throw new Error("Could not parse SS link in any known format.");}
-    function parseShadowsocksR(link) {try {const decoded = b64UrlDecode(link.substring('ssr://'.length));const mainParts = decoded.split('/?');const requiredParts = mainParts[0].split(':');if (requiredParts.length < 6) throw new Error("Invalid SSR main part");const [server, port, protocol, cipher, obfs, password_b64] = requiredParts;const paramsStr = mainParts.length > 1 ? mainParts[1] : '';const params = new URLSearchParams(paramsStr);const name = params.get('remarks') ? b64UrlDecode(params.get('remarks')) : `${server}:${port}`;const password = b64UrlDecode(password_b64);const obfsParam = params.get('obfsparam') ? b64UrlDecode(params.get('obfsparam')) : '';const protoParam = params.get('protoparam') ? b64UrlDecode(params.get('protoparam')) : '';return { name, type: 'ssr', server, port: parseInt(port, 10), cipher, password, protocol, 'protocol-param': protoParam, obfs, 'obfs-param': obfsParam, udp: true };} catch (e) {throw new Error(`SSR link parsing failed: ${e.message}`);}}
+    /**
+     * Decodes a base64-url string, common in SSR links.
+     * @param {string} str The base64-url string.
+     * @returns {string} The decoded string.
+     */
+    function b64UrlDecode(str) {
+        try {
+            str = str.replace(/-/g, '+').replace(/_/g, '/');
+            while (str.length % 4) { str += '='; }
+            return atob(str);
+        } catch(e) {
+            console.error("Base64URL Decode Failed for string:", str, e);
+            return "";
+        }
+    }
+
+    /**
+     * Parses Shadowsocks (SS) links. Handles both SIP002 and URI formats robustly.
+     * @param {string} link The ss:// link.
+     * @returns {Object|null} A proxy object or null if parsing fails.
+     */
+    function parseShadowsocks(link) {
+        try {
+            const hashIndex = link.indexOf('#');
+            const name = hashIndex > -1 ? decodeURIComponent(link.substring(hashIndex + 1)) : null;
+            const mainPart = hashIndex > -1 ? link.substring(5, hashIndex) : link.substring(5);
+
+            // 1. 尝试解析格式: ss://<base64(method:password@server:port)>
+            if (mainPart.indexOf('@') > -1) {
+                 const atIndex = mainPart.lastIndexOf('@');
+                 const authPart = mainPart.substring(0, atIndex);
+                 const hostPart = mainPart.substring(atIndex + 1);
+                 
+                 let cipher, password;
+                 try {
+                     const decodedAuth = atob(authPart);
+                     const colonIndex = decodedAuth.indexOf(':');
+                     if (colonIndex > -1) {
+                         cipher = decodedAuth.substring(0, colonIndex);
+                         password = decodedAuth.substring(colonIndex + 1);
+                     }
+                 } catch (e) {
+                    // 如果auth部分不是base64, 尝试作为 method:pass@...
+                    const authParts = decodeURIComponent(authPart).split(':');
+                    if(authParts.length >= 2) {
+                        cipher = authParts[0];
+                        password = authParts.slice(1).join(':');
+                    }
+                 }
+
+                 const hostColonIndex = hostPart.lastIndexOf(':');
+                 const server = hostPart.substring(0, hostColonIndex);
+                 const port = hostPart.substring(hostColonIndex + 1);
+
+                 if (server && port && cipher && password) {
+                     return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };
+                 }
+            }
+            
+            // 2. 尝试解析格式: ss://<base64(method:password)>@server:port
+            const url = new URL(link);
+            if (url.username) {
+                 const decodedAuth = atob(url.username);
+                 const [cipher, password] = decodedAuth.split(':');
+                 if (url.hostname && url.port && cipher && password) {
+                     return { name: name || `${url.hostname}:${url.port}`, type: 'ss', server: url.hostname, port: parseInt(url.port), cipher, password, udp: true };
+                 }
+            }
+
+        } catch (e) {
+            throw new Error(`SS link parsing failed: ${e.message}`);
+        }
+        
+        throw new Error("Could not parse SS link in any known format.");
+    }
+
+
+    /**
+     * Parses ShadowsocksR (SSR) links.
+     * @param {string} link The ssr:// link.
+     * @returns {Object|null} A proxy object or null if parsing fails.
+     */
+    function parseShadowsocksR(link) {
+        try {
+            const decoded = b64UrlDecode(link.substring('ssr://'.length));
+            const mainParts = decoded.split('/?');
+            const requiredParts = mainParts[0].split(':');
+            if (requiredParts.length < 6) throw new Error("Invalid SSR main part");
+
+            const [server, port, protocol, cipher, obfs, password_b64] = requiredParts;
+            const paramsStr = mainParts.length > 1 ? mainParts[1] : '';
+            const params = new URLSearchParams(paramsStr);
+            const name = params.get('remarks') ? b64UrlDecode(params.get('remarks')) : `${server}:${port}`;
+            const password = b64UrlDecode(password_b64);
+            const obfsParam = params.get('obfsparam') ? b64UrlDecode(params.get('obfsparam')) : '';
+            const protoParam = params.get('protoparam') ? b64UrlDecode(params.get('protoparam')) : '';
+
+            return { name, type: 'ssr', server, port: parseInt(port, 10), cipher, password, protocol, 'protocol-param': protoParam, obfs, 'obfs-param': obfsParam, udp: true };
+        } catch (e) {
+            throw new Error(`SSR link parsing failed: ${e.message}`);
+        }
+    }
+
     function parseShareLink(link) {if (!link) return []; let decodedLink = link; if (!link.includes('://') && (link.length % 4 === 0) && /^[a-zA-Z0-9+/]*={0,2}$/.test(link)) {try { decodedLink = atob(link); } catch (e) { /* ignore */ }} if (decodedLink.startsWith('ss://')) return [parseShadowsocks(decodedLink)]; if (decodedLink.startsWith('ssr://')) return [parseShadowsocksR(decodedLink)]; if (decodedLink.startsWith('vless://')) return [parseVless(decodedLink)]; if (decodedLink.startsWith('vmess://')) return [parseVmess(decodedLink)]; if (decodedLink.startsWith('trojan://')) return [parseTrojan(decodedLink)]; if (decodedLink.startsWith('tuic://')) return [parseTuic(decodedLink)]; if (decodedLink.startsWith('hysteria2://')) return [parseHysteria2(decodedLink)]; return [];}
     function parseVless(link) {try {const url = new URL(link);const params = url.searchParams;const proxy = {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'vless',server: url.hostname,port: parseInt(url.port, 10),uuid: url.username,network: params.get('type') || 'tcp',tls: params.get('security') === 'tls' || params.get('security') === 'reality',udp: true,flow: params.get('flow') || '','client-fingerprint': params.get('fp') || 'chrome',};if (proxy.tls) {proxy.servername = params.get('sni') || url.hostname;proxy.alpn = params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"];if (params.get('security') === 'reality') {proxy['reality-opts'] = { 'public-key': params.get('pbk'), 'short-id': params.get('sid') };}}if (proxy.network === 'ws') proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || url.hostname } };if (proxy.network === 'grpc') proxy['grpc-opts'] = { 'grpc-service-name': params.get('serviceName') || '' };return proxy;} catch(e) { throw new Error(`VLESS link parsing failed: ${e.message}`); } }
     function parseVmess(link) {try {const jsonStr = atob(link.substring('vmess://'.length));const config = JSON.parse(jsonStr);return {name: config.ps || config.add, type: 'vmess', server: config.add, port: parseInt(config.port, 10),uuid: config.id, alterId: config.aid, cipher: config.scy || 'auto',tls: config.tls === 'tls', network: config.net || 'tcp', udp: true,servername: config.sni || undefined,'ws-opts': config.net === 'ws' ? { path: config.path || '/', headers: { Host: config.host || config.add } } : undefined,'h2-opts': config.net === 'h2' ? { path: config.path || '/', host: [config.host || config.add] } : undefined,'grpc-opts': config.net === 'grpc' ? { 'grpc-service-name': config.path || ''} : undefined,};} catch(e) { throw new Error(`VMess link parsing failed: ${e.message}`); } }
@@ -34,34 +134,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const errorMessage = document.getElementById('error-message');
     const errorText = document.getElementById('error-text');
 
-    /**
-     * 【新增】: 通过后端代理获取远程订阅内容的函数
-     * @param {string} url The remote subscription URL.
-     * @returns {Promise<string[]>} A promise that resolves to an array of share links.
-     */
-    async function fetchRemoteSubscription(url) {
-        console.log(`[FRONTEND LOG] Fetching remote subscription via proxy: ${url}`);
-        const response = await fetch('/proxy-fetch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url }),
-        });
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`获取远程订阅失败 (${url.substring(0, 30)}...): ${errText}`);
-        }
-
-        const content = await response.text();
-        try {
-            const decoded = atob(content);
-            return decoded.split(/[\r\n]+/).filter(line => line.trim() !== '');
-        } catch (e) {
-            return content.split(/[\r\n]+/).filter(line => line.trim() !== '');
-        }
-    }
-
-
     // --- Event Listeners ---
     convertBtn.addEventListener('click', async () => {
         const inputData = subInput.value.trim();
@@ -82,29 +154,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
             for (const line of lines) {
                 try {
-                    let linesToParse = [line];
+                    // 【重要】只处理非http链接，因为E2EE模式下前端无法获取远程订阅
                     if (line.startsWith('http')) {
-                        linesToParse = await fetchRemoteSubscription(line);
+                        parsingErrors.push(`- 远程订阅 (${line.substring(0, 30)}...) 在安全模式下不支持。`);
+                        continue;
                     }
-                    
-                    for (const singleLink of linesToParse) {
-                        if (!singleLink.trim()) continue;
-                        
-                        const proxies = parseShareLink(singleLink);
-                        if (proxies && proxies.length > 0) {
-                            const validProxies = proxies.filter(p => p);
-                            if (validProxies.length > 0) {
-                                allProxies.push(...validProxies);
-                                allShareLinks.push(singleLink);
-                            } else {
-                                parsingErrors.push(`- 无法识别的链接格式: "${singleLink.substring(0, 40)}..."`);
-                            }
-                        } else if (singleLink.trim()) {
-                            parsingErrors.push(`- 不支持的链接类型: "${singleLink.substring(0, 40)}..."`);
+                    const proxies = parseShareLink(line);
+                    if (proxies && proxies.length > 0) {
+                        const validProxies = proxies.filter(p => p);
+                        if (validProxies.length > 0) {
+                            allProxies.push(...validProxies);
+                            allShareLinks.push(line);
+                        } else {
+                             parsingErrors.push(`- 无法识别的链接格式: "${line.substring(0, 40)}..."`);
                         }
+                    } else if (line.trim()) {
+                        parsingErrors.push(`- 不支持的链接类型: "${line.substring(0, 40)}..."`);
                     }
                 } catch (e) {
-                    parsingErrors.push(`- 处理链接时出错 "${line.substring(0, 40)}...": ${e.message}`);
+                    parsingErrors.push(`- "${line.substring(0, 40)}...": ${e.message}`);
                 }
             }
 
