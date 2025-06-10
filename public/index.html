@@ -4,10 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>通用订阅转换器</title>
+    <!-- Tailwind CSS - For rapid UI development -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Custom Stylesheet - For base styles and custom animations -->
     <link rel="stylesheet" href="/styles.css">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔄</text></svg>">
-    <!-- 【新增】加载Cloudflare Turnstile人机验证脚本 -->
+    <!-- Cloudflare Turnstile (Human Verification) -->
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200 font-sans">
@@ -24,7 +26,6 @@
                     <p class="mt-2 text-lg text-gray-500 dark:text-gray-400">生成一个唯一的提取码来分享您的订阅</p>
                 </header>
                 <main class="w-full bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
-                    <!-- 【升级】: 使用 <form> 元素包裹所有输入项 -->
                     <form id="conversion-form">
                         <!-- Input Area -->
                         <div>
@@ -44,7 +45,7 @@
                             </select>
                         </div>
 
-                        <!-- 【新增】Turnstile 人机验证小组件 -->
+                        <!-- Turnstile Widget -->
                         <div class="my-4 flex justify-center">
                             <!-- 【重要】请将下面的 YOUR_SITE_KEY_HERE 替换为您自己的Turnstile站点密钥 -->
                             <div class="cf-turnstile" data-sitekey="0x4AAAAAABghloXWAFfIMuAZ"></div>
@@ -90,7 +91,7 @@
                     <!-- Extraction Result Area -->
                     <div id="extract-result-area" class="hidden space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                         <h3 class="text-lg font-semibold text-gray-800 dark:text-white">✅ 提取成功！</h3>
-                        
+                        <p class="text-sm text-gray-500 dark:text-gray-400 -mt-2">以下链接已将您输入的所有节点合并，可作为通用订阅链接使用。</p>
                         <!-- Generic Sub Link -->
                         <div class="p-4 bg-yellow-50 dark:bg-yellow-900/50 rounded-lg border border-yellow-200 dark:border-yellow-800">
                             <div class="flex items-center justify-between">
@@ -101,7 +102,6 @@
                                 <button class="copy-btn px-2 py-1 text-xs bg-gray-200 dark:bg-gray-600 rounded" data-clipboard-target="#generic-result-link">复制</button>
                             </div>
                         </div>
-
                         <!-- Clash Link -->
                         <div class="p-4 bg-gray-100 dark:bg-gray-700 rounded-lg">
                             <div class="flex items-center justify-between">
@@ -128,7 +128,7 @@
         </div> <!-- End of Main Grid -->
 
         <!-- Universal Error Message Area -->
-        <div id="error-message" class="hidden fixed bottom-5 right-5 p-4 text-sm text-white bg-red-600 rounded-lg shadow-xl transition-opacity duration-300" role="alert">
+        <div id="error-message" class="hidden fixed bottom-5 right-5 p-4 text-sm text-white bg-red-600 rounded-lg shadow-xl" role="alert">
             <span class="font-medium">错误:</span> <span id="error-text"></span>
         </div>
         
