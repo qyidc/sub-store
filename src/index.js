@@ -1,24 +1,40 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers! (集成Turnstile人机验证版)
+ * 欢迎来到 Cloudflare Workers! (集成Turnstile人机验证修复版)
  * =================================================================================
  *
  * 【核心升级】:
- * 1. 【人机验证】: /convert 接口现在会验证前端提交的Cloudflare Turnstile令牌。
- * 2. 【安全配置】: 验证逻辑依赖于在Worker设置中配置的 `TURNSTILE_SECRET` 机密变量。
+ * 1. 【CORS修复】: 修正了CORS预检请求(OPTIONS)的处理逻辑，确保POST请求体能被正确解析。
+ * 2. 【人机验证】: /convert 接口现在会验证前端提交的Cloudflare Turnstile令牌。
+ * 3. 【安全配置】: 验证逻辑依赖于在Worker设置中配置的 `TURNSTILE_SECRET` 机密变量。
  */
 
 // =================================================================================
-// Turnstile 验证函数
+// CORS 和 Turnstile 验证模块
 // =================================================================================
-/**
- * @description 验证Cloudflare Turnstile令牌的有效性。
- * @param {string} token - 从前端获取的 cf-turnstile-response 令牌。
- * @param {string} secret - 在Worker环境变量中配置的Turnstile秘密密钥。
- * @param {string} remoteip - 用户的IP地址。
- * @returns {Promise<boolean>} 如果令牌有效则返回 true，否则返回 false。
- */
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
+function handleOptions(request) {
+  if (
+    request.headers.get('Origin') !== null &&
+    request.headers.get('Access-Control-Request-Method') !== null &&
+    request.headers.get('Access-Control-Request-Headers') !== null
+  ) {
+    return new Response(null, { headers: corsHeaders });
+  } else {
+    return new Response(null, { headers: { Allow: 'GET, POST, OPTIONS' } });
+  }
+}
+
 async function verifyTurnstileToken(token, secret, remoteip) {
+    if (!secret) {
+        console.warn("Turnstile secret (TURNSTILE_SECRET) is not set. Skipping verification for development.");
+        return true; 
+    }
     const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -39,6 +55,11 @@ const Router = () => {
 	const routes = [];
 	const add = (method, path, handler) => routes.push({ method, path, handler });
 	const handle = async (request, env, ctx) => {
+        // 【修复】: 将OPTIONS请求处理移到最前面
+        if (request.method === 'OPTIONS') {
+            return handleOptions(request);
+        }
+
 		const url = new URL(request.url);
 		for (const route of routes) {
 			if (request.method !== route.method) continue;
@@ -67,26 +88,16 @@ const router = Router();
 // =================================================================================
 router.post(/^\/convert$/, async ({ request, env }) => {
 	try {
-        // 【升级】: 从请求体中额外解析 turnstileToken
 		const { subscription_data, expirationDays, turnstileToken } = await request.json();
 
-        // 【新增】: 人机验证检查
-        if (!env.TURNSTILE_SECRET) {
-            // 如果管理员未配置密钥，后台发出警告但跳过验证，方便无密钥时进行测试
-            console.warn("Turnstile secret (TURNSTILE_SECRET) is not set. Skipping verification.");
-        } else {
-            if (!turnstileToken) {
-                return new Response('缺少人机验证令牌。请刷新页面重试。', { status: 403 });
-            }
-            const userIp = request.headers.get('CF-Connecting-IP');
-            const isValid = await verifyTurnstileToken(turnstileToken, env.TURNSTILE_SECRET, userIp);
-            if (!isValid) {
-                return new Response('人机验证失败。请刷新页面重试。', { status: 403 });
-            }
+        const userIp = request.headers.get('CF-Connecting-IP');
+        const isValid = await verifyTurnstileToken(turnstileToken, env.TURNSTILE_SECRET, userIp);
+        if (!isValid) {
+            return new Response('人机验证失败。请刷新页面重试。', { status: 403, headers: corsHeaders });
         }
 
 		if (!subscription_data) {
-			return new Response('Request body is empty or invalid.', { status: 400 });
+			return new Response('Request body is empty or invalid.', { status: 400, headers: corsHeaders });
 		}
 
 		const lines = subscription_data.split(/[\r\n]+/).filter(line => line.trim() !== '');
@@ -109,14 +120,14 @@ router.post(/^\/convert$/, async ({ request, env }) => {
                 }
 				const remoteLines = decodedContent.split(/[\r\n]+/).filter(l => l.trim() !== '');
 				for (const remoteLine of remoteLines) {
-					const proxies = await parseShareLink(remoteLine);
+					const proxies = parseShareLink(remoteLine);
                     if (proxies.length > 0) {
 					    allProxies.push(...proxies);
                         allShareLinks.push(remoteLine);
                     }
 				}
 			} else {
-				const proxies = await parseShareLink(line);
+				const proxies = parseShareLink(line);
                 if (proxies.length > 0) {
 				    allProxies.push(...proxies);
                     allShareLinks.push(line);
@@ -125,7 +136,7 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 		}
 
 		if (allProxies.length === 0) {
-			return new Response('未找到有效的代理节点。请检查您的链接或订阅。', { status: 400 });
+			return new Response('未找到有效的代理节点。请检查您的链接或订阅。', { status: 400, headers: corsHeaders });
 		}
 		
 		allProxies = allProxies.filter((proxy, index, self) =>
@@ -164,16 +175,14 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 			success: true,
             extractionCode: extractionCode,
 		}), {
-			headers: { 'Content-Type': 'application/json' },
+			headers: { 'Content-Type': 'application/json', ...corsHeaders },
 		});
 
 	} catch (error) {
 		console.error('Conversion error:', error);
-		return new Response(`发生错误: ${error.message}`, { status: 500 });
+		return new Response(`发生错误: ${error.message}`, { status: 500, headers: corsHeaders });
 	}
 });
-
-// ... (The rest of the file remains unchanged, so it's omitted for brevity) ...
 
 // =================================================================================
 // 提取路由: /extract 
@@ -182,7 +191,7 @@ router.post(/^\/extract$/, async ({ request, env }) => {
     try {
         const { extractionCode } = await request.json();
         if (!extractionCode) {
-            return new Response('Extraction code is required.', { status: 400 });
+            return new Response('Extraction code is required.', { status: 400, headers: corsHeaders });
         }
         
         const clashFileId = `clash-${extractionCode}.yaml`;
@@ -195,7 +204,7 @@ router.post(/^\/extract$/, async ({ request, env }) => {
 
         const object = await env.SUB_STORE.head(clashR2Key);
         if (object === null) {
-            return new Response('提取码无效或链接已过期。', { status: 404 });
+            return new Response('提取码无效或链接已过期。', { status: 404, headers: corsHeaders });
         }
         
         const urlBase = new URL(request.url).origin;
@@ -209,34 +218,33 @@ router.post(/^\/extract$/, async ({ request, env }) => {
             singboxUrl: singboxUrl,
             genericSubUrl: genericSubUrl,
         }), {
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
 
     } catch (e) {
         console.error('Extraction error:', e);
-        return new Response(`An error occurred: ${e.message}`, { status: 500 });
+        return new Response(`An error occurred: ${e.message}`, { status: 500, headers: corsHeaders });
     }
 });
 
 
 // =================================================================================
-// 新增路由: /generic (提供通用订阅)
+// GET 路由
 // =================================================================================
 router.get(/^\/generic\/(?<path>.+)$/, async ({ params, env }) => {
 	const object = await env.SUB_STORE.get(`generic/${params.path}`);
 	if (object === null) {
 		return new Response('Generic subscription not found.', { status: 404 });
 	}
-	const headers = new Headers();
-	headers.set('Content-Type', 'text/plain; charset=utf-8');
-	headers.set('etag', object.httpEtag);
+	const headers = new Headers({
+        'Content-Type': 'text/plain; charset=utf-8',
+        'etag': object.httpEtag,
+        ...corsHeaders
+    });
 	return new Response(object.body, { headers });
 });
 
 
-// =================================================================================
-// 下载和订阅路由
-// =================================================================================
 router.get(/^\/download\/(?<path>.+)$/, async ({ params, env }) => {
 	const object = await env.SUB_STORE.get(params.path);
 	if (object === null) {
@@ -245,8 +253,10 @@ router.get(/^\/download\/(?<path>.+)$/, async ({ params, env }) => {
 	const headers = new Headers();
 	object.writeHttpMetadata(headers);
 	headers.set('etag', object.httpEtag);
-	const filename = params.path.split('/').pop();
-	headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+	headers.set('Content-Disposition', `attachment; filename="${params.path.split('/').pop()}"`);
+    for(const [key, value] of Object.entries(corsHeaders)) {
+        headers.set(key, value);
+    }
 	return new Response(object.body, { headers });
 });
 
@@ -258,13 +268,12 @@ router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request }) => {
         return new Response('Subscription not found in R2.', { status: 404 });
     }
     const configText = await object.text();
-    const headers = new Headers();
-    headers.set('Content-Type', 'text/plain; charset=utf-8');
-    headers.set('etag', object.httpEtag);
-    const proxyCount = (configText.match(/name:/g) || []).length;
-    const expireTimestamp = object.expires 
-        ? Math.floor(object.expires.getTime() / 1000) 
-        : Math.floor((Date.now() + 7 * 24 * 60 * 60 * 1000) / 1000);
+    const headers = new Headers({
+        'Content-Type': 'text/plain; charset=utf-8',
+        'etag': object.httpEtag,
+        ...corsHeaders
+    });
+    const expireTimestamp = object.expires ? Math.floor(object.expires.getTime() / 1000) : 0;
     headers.set('subscription-userinfo', `upload=0; download=0; total=107374182400; expire=${expireTimestamp}`);
     headers.set('profile-update-interval', '24');
     headers.set('profile-web-page-url', new URL(request.url).origin);
@@ -272,9 +281,6 @@ router.get(/^\/sub\/(?<path>.+)$/, async ({ params, env, request }) => {
 });
 
 
-// =================================================================================
-// 静态资源服务 (Serving Static Assets)
-// =================================================================================
 async function serveStaticAsset({ request, env }) {
 	const url = new URL(request.url);
 	let key = url.pathname.slice(1);
@@ -302,7 +308,7 @@ export default {
 // #################################################################################
 //                          协议解析与配置生成模块
 // #################################################################################
-async function parseShareLink(link) {if (!link) return [];try {let decodedLink = link;if (!link.includes('://') && (link.length % 4 === 0) && /^[a-zA-Z0-9+/]*={0,2}$/.test(link)) {try { decodedLink = atob(link); } catch (e) { /* ignore */ }}if (decodedLink.startsWith('ss://')) return [parseShadowsocks(decodedLink)];if (decodedLink.startsWith('ssr://')) return [parseShadowsocksR(decodedLink)];if (decodedLink.startsWith('vless://')) return [parseVless(decodedLink)];if (decodedLink.startsWith('vmess://')) return [parseVmess(decodedLink)];if (decodedLink.startsWith('trojan://')) return [parseTrojan(decodedLink)];if (decodedLink.startsWith('tuic://')) return [parseTuic(decodedLink)];if (decodedLink.startsWith('hysteria2://')) return [parseHysteria2(decodedLink)];} catch (error) {console.warn(`Skipping invalid link: ${link.substring(0, 40)}...`, error.message);return [];}return [];}
+function parseShareLink(link) {if (!link) return [];try {let decodedLink = link;if (!link.includes('://') && (link.length % 4 === 0) && /^[a-zA-Z0-9+/]*={0,2}$/.test(link)) {try { decodedLink = atob(link); } catch (e) { /* ignore */ }}if (decodedLink.startsWith('ss://')) return [parseShadowsocks(decodedLink)];if (decodedLink.startsWith('ssr://')) return [parseShadowsocksR(decodedLink)];if (decodedLink.startsWith('vless://')) return [parseVless(decodedLink)];if (decodedLink.startsWith('vmess://')) return [parseVmess(decodedLink)];if (decodedLink.startsWith('trojan://')) return [parseTrojan(decodedLink)];if (decodedLink.startsWith('tuic://')) return [parseTuic(decodedLink)];if (decodedLink.startsWith('hysteria2://')) return [parseHysteria2(decodedLink)];} catch (error) {console.warn(`Skipping invalid link: ${link.substring(0, 40)}...`, error.message);return [];}return [];}
 function parseShadowsocks(link) {const url = new URL(link);const decodedPart = atob(url.hostname);const [cipher, password] = decodedPart.split(':');const [server, port] = url.pathname.slice(2).split(':');return {name: decodeURIComponent(url.hash).substring(1) || `${server}:${port}`,type: 'ss',server: server,port: parseInt(port, 10),cipher: cipher,password: password,udp: true};}
 function parseShadowsocksR(link) {const decoded = atob(link.substring('ssr://'.length));const mainParts = decoded.split('/?');const [server, port, protocol, cipher, obfs, password_b64] = mainParts[0].split(':');const params = new URLSearchParams(atob(mainParts[1] || ''));return {name: atob(params.get('remarks') || '') || `${server}:${port}`,type: 'ssr',server: server,port: parseInt(port, 10),cipher: cipher,password: atob(password_b64),protocol: protocol,'protocol-param': atob(params.get('protoparam') || ''),obfs: obfs,'obfs-param': atob(params.get('obfsparam') || ''),udp: true};}
 function parseVless(link) {const url = new URL(link);const params = url.searchParams;const proxy = {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'vless',server: url.hostname,port: parseInt(url.port, 10),uuid: url.username,network: params.get('type') || 'tcp',tls: params.get('security') === 'tls' || params.get('security') === 'reality',udp: true,flow: params.get('flow') || '','client-fingerprint': params.get('fp') || 'chrome',};if (proxy.tls) {proxy.servername = params.get('sni') || url.hostname;proxy.alpn = params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"];if (params.get('security') === 'reality') {proxy['reality-opts'] = { 'public-key': params.get('pbk'), 'short-id': params.get('sid') };}}if (proxy.network === 'ws') proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || url.hostname } };if (proxy.network === 'grpc') proxy['grpc-opts'] = { 'grpc-service-name': params.get('serviceName') || '' };return proxy;}
