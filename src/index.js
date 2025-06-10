@@ -1,12 +1,12 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers! (纯粹的端到端加密最终版)
+ * 欢迎来到 Cloudflare Workers! (带提取日志的最终版)
  * =================================================================================
  *
  * 【架构定型】:
  * 1. 【CORS支持】: 正确处理CORS预检请求(OPTIONS)，允许前端发送 `application/json` 类型的POST请求。
  * 2. 【纯粹的E2EE】: 此后端只负责存储和提取加密数据。所有明文处理逻辑和相关GET路由已被彻底移除。
- * 3. 【角色明确】: 后端是“零知识”的仓库管理员，前端是“全能”的安全处理器。
+ * 3. 【提取调试】: 在 /extract 接口中加入了详细的日志，用于追踪数据从R2到前端的全过程。
  */
 
 // =================================================================================
@@ -14,7 +14,7 @@
 // =================================================================================
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS', // 只允许POST和OPTIONS
+  'Access-Control-Allow-Methods': 'POST, OPTIONS', 
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
@@ -40,7 +40,6 @@ const Router = () => {
         if (request.method === 'OPTIONS') {
             return handleOptions(request);
         }
-
 		const url = new URL(request.url);
 		for (const route of routes) {
 			if (request.method !== route.method) continue;
@@ -50,11 +49,9 @@ const Router = () => {
 				return await route.handler({ request, params, url, env, ctx });
 			}
 		}
-		
 		if (request.method === 'GET') {
 			return serveStaticAsset({ request, env });
 		}
-
 		return new Response('Not Found', { status: 404 });
 	};
 	return {
@@ -103,21 +100,31 @@ router.post(/^\/convert$/, async ({ request, env }) => {
 });
 
 // =================================================================================
-// 提取路由: /extract (只返回加密数据)
+// 提取路由: /extract (只返回加密数据) - 【带详细日志】
 // =================================================================================
 router.post(/^\/extract$/, async ({ request, env }) => {
     try {
+        console.log("[BACKEND LOG] /extract endpoint hit.");
         const { extractionCode } = await request.json();
+        console.log(`[BACKEND LOG] Received request for extractionCode: ${extractionCode}`);
+        
         if (!extractionCode) {
+            console.error("[BACKEND LOG] Extraction code is missing from request.");
             return new Response('Extraction code is required.', { status: 400, headers: corsHeaders });
         }
         
         const r2Key = `e2ee/${extractionCode}`;
+        console.log(`[BACKEND LOG] Constructed R2 key: ${r2Key}`);
+        
         const object = await env.SUB_STORE.get(r2Key, { type: 'text' });
+        console.log("[BACKEND LOG] Performed R2 get operation.");
 
         if (object === null) {
+            console.error(`[BACKEND LOG] Object not found in R2 for key: ${r2Key}`);
             return new Response('提取码无效或链接已过期。', { status: 404, headers: corsHeaders });
         }
+        
+        console.log(`[BACKEND LOG] Object found. Data length: ${object.length}. Preparing to send to frontend.`);
         
         return new Response(JSON.stringify({ 
             success: true, 
@@ -127,8 +134,8 @@ router.post(/^\/extract$/, async ({ request, env }) => {
         });
 
     } catch (e) {
-        console.error('Extraction error:', e);
-        return new Response(`An error occurred: ${e.message}`, { status: 500, headers: corsHeaders });
+        console.error(`[BACKEND LOG] CRITICAL ERROR in /extract: ${e.message}`, e.stack);
+        return new Response(`An error occurred during extraction: ${e.message}`, { status: 500, headers: corsHeaders });
     }
 });
 
