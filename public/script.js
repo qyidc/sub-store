@@ -20,26 +20,57 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * 【终极修复版】: Parses Shadowsocks (SS) links. Handles both SIP002 and URI formats robustly.
+     * 【终极修复版】: 一个更健壮的SS解析器，能处理多种格式。
      * @param {string} link The ss:// link.
      * @returns {Object|null} A proxy object or null if parsing fails.
      */
     function parseShadowsocks(link) {
         try {
-            if (!link.startsWith("ss://")) {
-                throw new Error("Invalid SS link prefix");
+            // 1. 尝试将链接作为标准URL对象进行解析，这能处理大多数URI格式
+            const url = new URL(link);
+            const name = decodeURIComponent(url.hash.substring(1)) || `${url.hostname}:${url.port}`;
+            let cipher, password;
+
+            // Case A: 认证信息是 Base64 编码的 (常见于 V2RayN)
+            // e.g., ss://YWVzLTI1Ni1nY206MTIzNDU2@example.com:8080
+            // 在这种格式下, url.password 为空, 所有认证信息都在 url.username 中
+            if (url.password === '' && url.username) {
+                try {
+                    const decodedAuth = atob(url.username);
+                    const colonIndex = decodedAuth.indexOf(':');
+                    if (colonIndex > 0) {
+                        cipher = decodedAuth.substring(0, colonIndex);
+                        password = decodedAuth.substring(colonIndex + 1);
+                    } else {
+                        throw new Error("Decoded auth part is invalid.");
+                    }
+                } catch(e) {
+                    // 如果解码失败，说明它不是Base64，这是一种不规范但可能存在的格式
+                    throw new Error("Auth part looks like Base64 but failed to decode.");
+                }
+            }
+            // Case B: 认证信息是明文的
+            // e.g., ss://aes-256-gcm:123456@example.com:8080
+            else if (url.username && url.password) {
+                cipher = decodeURIComponent(url.username);
+                password = decodeURIComponent(url.password);
+            } else {
+                throw new Error("Could not find auth info in URL format.");
+            }
+            
+            if (url.hostname && url.port && cipher && password) {
+                return { name, type: 'ss', server: url.hostname, port: parseInt(url.port, 10), cipher, password, udp: true };
             }
 
-            const hashIndex = link.indexOf('#');
-            const name = hashIndex > -1 ? decodeURIComponent(link.substring(hashIndex + 1)) : null;
-            const corePart = hashIndex > -1 ? link.substring(5, hashIndex) : link.substring(5);
+        } catch (e) {
+            // 2. 如果标准URL解析失败，则尝试将其作为SIP002格式解析
+            // e.g., ss://<base64(method:password@server:port)>#<tag>
+            try {
+                const hashIndex = link.indexOf('#');
+                const name = hashIndex > -1 ? decodeURIComponent(link.substring(hashIndex + 1)) : null;
+                const corePart = hashIndex > -1 ? link.substring(5, hashIndex) : link.substring(5);
 
-            // Case 1: SIP002 format where the core is a single base64 string
-            // ss://<base64(method:password@server:port)>#<tag>
-            // This is the most common format and might use URL-safe base64.
-            if (corePart.indexOf('@') === -1) {
-                // 【核心修复】: 使用我们自己的 b64UrlDecode 函数，以兼容标准和URL-safe两种Base64编码。
-                const decoded = b64UrlDecode(corePart);
+                const decoded = b64UrlDecode(corePart); // 使用URL-safe解码
                 if (!decoded) throw new Error("SIP002 core part is not valid Base64.");
                 
                 const atIndex = decoded.lastIndexOf('@');
@@ -48,33 +79,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const authPart = decoded.substring(0, atIndex);
                 const hostPart = decoded.substring(atIndex + 1);
                 
-                const [cipher, password] = authPart.split(':');
-                const [server, port] = hostPart.split(':');
-
-                if (server && port && cipher && password) {
-                    return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };
-                }
-            }
-            // Case 2: URI scheme format, common with V2RayN
-            // ss://<base64(method:password)>@<host>:<port>
-            else {
-                const atIndex = corePart.lastIndexOf('@');
-                const authPartB64 = corePart.substring(0, atIndex);
-                const hostPart = corePart.substring(atIndex + 1);
-                let cipher, password;
-
-                // The auth part is usually standard Base64 in this format.
-                const decodedAuth = atob(authPartB64);
-                const colonIndex = decodedAuth.indexOf(':');
-                if (colonIndex > 0) {
-                    cipher = decodedAuth.substring(0, colonIndex);
-                    password = decodedAuth.substring(colonIndex + 1);
-                } else {
-                    throw new Error("Decoded auth part is invalid.");
-                }
+                const colonIndex = authPart.indexOf(':');
+                if (colonIndex <= 0) throw new Error("Invalid SIP002 auth part");
+                
+                const cipher = authPart.substring(0, colonIndex);
+                const password = authPart.substring(colonIndex + 1);
                 
                 const hostColonIndex = hostPart.lastIndexOf(':');
-                if (hostColonIndex === -1) throw new Error("Invalid host part: missing port");
+                if (hostColonIndex <= 0) throw new Error("Invalid SIP002 host part");
 
                 const server = hostPart.substring(0, hostColonIndex);
                 const port = hostPart.substring(hostColonIndex + 1);
@@ -82,41 +94,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (server && port && cipher && password) {
                     return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };
                 }
+            } catch (e2) {
+                 throw new Error(`SS link parsing failed: ${e2.message}`);
             }
-        } catch (e) {
-            throw new Error(`SS link parsing failed: ${e.message}`);
         }
         
         throw new Error("Could not parse SS link in any known format.");
     }
 
-
-    /**
-     * Parses ShadowsocksR (SSR) links.
-     * @param {string} link The ssr:// link.
-     * @returns {Object|null} A proxy object or null if parsing fails.
-     */
-    function parseShadowsocksR(link) {
-        try {
-            const decoded = b64UrlDecode(link.substring('ssr://'.length));
-            const mainParts = decoded.split('/?');
-            const requiredParts = mainParts[0].split(':');
-            if (requiredParts.length < 6) throw new Error("Invalid SSR main part");
-
-            const [server, port, protocol, cipher, obfs, password_b64] = requiredParts;
-            const paramsStr = mainParts.length > 1 ? mainParts[1] : '';
-            const params = new URLSearchParams(paramsStr);
-            const name = params.get('remarks') ? b64UrlDecode(params.get('remarks')) : `${server}:${port}`;
-            const password = b64UrlDecode(password_b64);
-            const obfsParam = params.get('obfsparam') ? b64UrlDecode(params.get('obfsparam')) : '';
-            const protoParam = params.get('protoparam') ? b64UrlDecode(params.get('protoparam')) : '';
-
-            return { name, type: 'ssr', server, port: parseInt(port, 10), cipher, password, protocol, 'protocol-param': protoParam, obfs, 'obfs-param': obfsParam, udp: true };
-        } catch (e) {
-            throw new Error(`SSR link parsing failed: ${e.message}`);
-        }
-    }
-
+    function parseShadowsocksR(link) {try {const decoded = b64UrlDecode(link.substring('ssr://'.length));const mainParts = decoded.split('/?');const requiredParts = mainParts[0].split(':');if (requiredParts.length < 6) throw new Error("Invalid SSR main part");const [server, port, protocol, cipher, obfs, password_b64] = requiredParts;const paramsStr = mainParts.length > 1 ? mainParts[1] : '';const params = new URLSearchParams(paramsStr);const name = params.get('remarks') ? b64UrlDecode(params.get('remarks')) : `${server}:${port}`;const password = b64UrlDecode(password_b64);const obfsParam = params.get('obfsparam') ? b64UrlDecode(params.get('obfsparam')) : '';const protoParam = params.get('protoparam') ? b64UrlDecode(params.get('protoparam')) : '';return { name, type: 'ssr', server, port: parseInt(port, 10), cipher, password, protocol, 'protocol-param': protoParam, obfs, 'obfs-param': obfsParam, udp: true };} catch (e) {throw new Error(`SSR link parsing failed: ${e.message}`);}}
     function parseShareLink(link) {if (!link) return []; let decodedLink = link; if (!link.includes('://') && (link.length % 4 === 0) && /^[a-zA-Z0-9+/]*={0,2}$/.test(link)) {try { decodedLink = atob(link); } catch (e) { /* ignore */ }} if (decodedLink.startsWith('ss://')) return [parseShadowsocks(decodedLink)]; if (decodedLink.startsWith('ssr://')) return [parseShadowsocksR(decodedLink)]; if (decodedLink.startsWith('vless://')) return [parseVless(decodedLink)]; if (decodedLink.startsWith('vmess://')) return [parseVmess(decodedLink)]; if (decodedLink.startsWith('trojan://')) return [parseTrojan(decodedLink)]; if (decodedLink.startsWith('tuic://')) return [parseTuic(decodedLink)]; if (decodedLink.startsWith('hysteria2://')) return [parseHysteria2(decodedLink)]; return [];}
     function parseVless(link) {try {const url = new URL(link);const params = url.searchParams;const proxy = {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'vless',server: url.hostname,port: parseInt(url.port, 10),uuid: url.username,network: params.get('type') || 'tcp',tls: params.get('security') === 'tls' || params.get('security') === 'reality',udp: true,flow: params.get('flow') || '','client-fingerprint': params.get('fp') || 'chrome',};if (proxy.tls) {proxy.servername = params.get('sni') || url.hostname;proxy.alpn = params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"];if (params.get('security') === 'reality') {proxy['reality-opts'] = { 'public-key': params.get('pbk'), 'short-id': params.get('sid') };}}if (proxy.network === 'ws') proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || url.hostname } };if (proxy.network === 'grpc') proxy['grpc-opts'] = { 'grpc-service-name': params.get('serviceName') || '' };return proxy;} catch(e) { throw new Error(`VLESS link parsing failed: ${e.message}`); } }
     function parseVmess(link) {try {const jsonStr = atob(link.substring('vmess://'.length));const config = JSON.parse(jsonStr);return {name: config.ps || config.add, type: 'vmess', server: config.add, port: parseInt(config.port, 10),uuid: config.id, alterId: config.aid, cipher: config.scy || 'auto',tls: config.tls === 'tls', network: config.net || 'tcp', udp: true,servername: config.sni || undefined,'ws-opts': config.net === 'ws' ? { path: config.path || '/', headers: { Host: config.host || config.add } } : undefined,'h2-opts': config.net === 'h2' ? { path: config.path || '/', host: [config.host || config.add] } : undefined,'grpc-opts': config.net === 'grpc' ? { 'grpc-service-name': config.path || ''} : undefined,};} catch(e) { throw new Error(`VMess link parsing failed: ${e.message}`); } }
@@ -165,7 +151,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             for (const line of lines) {
                 try {
-                    // 【重要】只处理非http链接，因为E2EE模式下前端无法获取远程订阅
                     if (line.startsWith('http')) {
                         parsingErrors.push(`- 远程订阅 (${line.substring(0, 30)}...) 在安全模式下不支持。`);
                         continue;
