@@ -4,7 +4,7 @@
 版本: 1.1 (含详细部署指南)  
 日期: 2025年6月9日
 
-![Screenshot_7.png](https://img.800122.xyz/file/1749524083793_Screenshot_7.png)
+![Screenshot_8.png](https://img.800122.xyz/file/1749524250714_Screenshot_8.png)
 
 ### **摘要**
 
