@@ -1,15 +1,106 @@
 document.addEventListener('DOMContentLoaded', () => {
     // #################################################################################
-    //                          协议解析与配置生成模块 (已迁移至前端)
+    //                          协议解析与配置生成模块 (最终修复版)
     // #################################################################################
+    
+    // Base64-URL解码函数，用于SSR链接
+    function b64UrlDecode(str) {
+        try {
+            str = str.replace(/-/g, '+').replace(/_/g, '/');
+            while (str.length % 4) { str += '='; }
+            return atob(str);
+        } catch(e) {
+            console.error("Base64URL Decode Failed:", e);
+            return "";
+        }
+    }
+
+    function parseShadowsocks(link) {
+        try {
+            // 1. 尝试标准URL格式: ss://<auth>@<host>:<port>#<tag>
+            //    其中 <auth> 部分可以是 method:pass 或者 base64(method:pass)
+            const url = new URL(link);
+            const name = decodeURIComponent(url.hash).substring(1) || `${url.hostname}:${url.port}`;
+            let cipher, password;
+
+            // 尝试将 username 部分作为 base64 解码
+            try {
+                const decodedAuth = atob(url.username);
+                const authParts = decodedAuth.split(':');
+                if (authParts.length >= 2) {
+                    cipher = authParts[0];
+                    password = authParts.slice(1).join(':');
+                }
+            } catch (e) {
+                // 如果解码失败, 假定为 method:password 格式
+                cipher = url.username;
+                password = url.password;
+            }
+
+            if (url.hostname && url.port && cipher && password) {
+                return { name, type: 'ss', server: url.hostname, port: parseInt(url.port, 10), cipher, password, udp: true };
+            }
+        } catch (e) {
+            // 如果URL解析失败，则可能是SIP002格式，继续尝试
+        }
+
+        // 2. 尝试SIP002格式: ss://<base64(method:password@server:port)>#<tag>
+        try {
+            const parts = link.substring(5).split('#');
+            const decoded = atob(parts[0]);
+            const name = parts[1] ? decodeURIComponent(parts[1]) : null;
+            
+            const atIndex = decoded.lastIndexOf('@');
+            if (atIndex === -1) return null; // 格式无效
+            
+            const authPart = decoded.substring(0, atIndex);
+            const hostPart = decoded.substring(atIndex + 1);
+            
+            const [cipher, password] = authPart.split(':');
+            const [server, port] = hostPart.split(':');
+            
+            if (server && port && cipher && password) {
+                return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };
+            }
+        } catch (e) {
+            console.error("Failed to parse SS link in any known format:", link, e);
+        }
+
+        return null;
+    }
+
+    function parseShadowsocksR(link) {
+        try {
+            const decoded = b64UrlDecode(link.substring('ssr://'.length));
+            const mainParts = decoded.split('/?');
+            const [server, port, protocol, cipher, obfs, password_b64] = mainParts[0].split(':');
+            const params = new URLSearchParams(mainParts[1] || '');
+
+            return {
+                name: params.get('remarks') ? b64UrlDecode(params.get('remarks')) : `${server}:${port}`,
+                type: 'ssr',
+                server: server,
+                port: parseInt(port, 10),
+                cipher: cipher,
+                password: b64UrlDecode(password_b64),
+                protocol: protocol,
+                'protocol-param': params.get('protoparam') ? b64UrlDecode(params.get('protoparam')) : '',
+                obfs: obfs,
+                'obfs-param': params.get('obfsparam') ? b64UrlDecode(params.get('obfsparam')) : '',
+                udp: true
+            };
+        } catch (e) {
+            console.error("Failed to parse SSR link:", link, e);
+            return null;
+        }
+    }
+
     function parseShareLink(link) {if (!link) return [];try {let decodedLink = link;if (!link.includes('://') && (link.length % 4 === 0) && /^[a-zA-Z0-9+/]*={0,2}$/.test(link)) {try { decodedLink = atob(link); } catch (e) { /* ignore */ }}if (decodedLink.startsWith('ss://')) return [parseShadowsocks(decodedLink)];if (decodedLink.startsWith('ssr://')) return [parseShadowsocksR(decodedLink)];if (decodedLink.startsWith('vless://')) return [parseVless(decodedLink)];if (decodedLink.startsWith('vmess://')) return [parseVmess(decodedLink)];if (decodedLink.startsWith('trojan://')) return [parseTrojan(decodedLink)];if (decodedLink.startsWith('tuic://')) return [parseTuic(decodedLink)];if (decodedLink.startsWith('hysteria2://')) return [parseHysteria2(decodedLink)];} catch (error) {console.warn(`Skipping invalid link: ${link.substring(0, 40)}...`, error.message);return [];}return [];}
-    function parseShadowsocks(link) {try{const url = new URL(link);const b64part = url.href.substring(5, url.href.indexOf('@'));const decoded = atob(b64part);const [cipher, password] = decoded.split(':');return {name: decodeURIComponent(url.hash).substring(1) || `${url.hostname}:${url.port}`,type: 'ss',server: url.hostname,port: parseInt(url.port, 10),cipher: cipher,password: password,udp: true};}catch(e){try{let newLink = "ss://" + atob(link.substring(5)); return parseShadowsocks(newLink);} catch(e2){return null;}}}
-    function parseShadowsocksR(link) {const decoded = atob(link.substring('ssr://'.length));const mainParts = decoded.split('/?');const [server, port, protocol, cipher, obfs, password_b64] = mainParts[0].split(':');const params = new URLSearchParams(mainParts[1] ? atob(mainParts[1]) : '');return {name: params.get('remarks') ? atob(params.get('remarks')) : `${server}:${port}`,type: 'ssr',server: server,port: parseInt(port, 10),cipher: cipher,password: atob(password_b64),protocol: protocol,'protocol-param': params.get('protoparam') ? atob(params.get('protoparam')) : '',obfs: obfs,'obfs-param': params.get('obfsparam') ? atob(params.get('obfsparam')) : '',udp: true};}
-    function parseVless(link) {const url = new URL(link);const params = url.searchParams;const proxy = {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'vless',server: url.hostname,port: parseInt(url.port, 10),uuid: url.username,network: params.get('type') || 'tcp',tls: params.get('security') === 'tls' || params.get('security') === 'reality',udp: true,flow: params.get('flow') || '','client-fingerprint': params.get('fp') || 'chrome',};if (proxy.tls) {proxy.servername = params.get('sni') || url.hostname;proxy.alpn = params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"];if (params.get('security') === 'reality') {proxy['reality-opts'] = { 'public-key': params.get('pbk'), 'short-id': params.get('sid') };}}if (proxy.network === 'ws') proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || url.hostname } };if (proxy.network === 'grpc') proxy['grpc-opts'] = { 'grpc-service-name': params.get('serviceName') || '' };return proxy;}
-    function parseVmess(link) {const jsonStr = atob(link.substring('vmess://'.length));const config = JSON.parse(jsonStr);return {name: config.ps || config.add, type: 'vmess', server: config.add, port: parseInt(config.port, 10),uuid: config.id, alterId: config.aid, cipher: config.scy || 'auto',tls: config.tls === 'tls', network: config.net || 'tcp', udp: true,servername: config.sni || undefined,'ws-opts': config.net === 'ws' ? { path: config.path || '/', headers: { Host: config.host || config.add } } : undefined,'h2-opts': config.net === 'h2' ? { path: config.path || '/', host: [config.host || config.add] } : undefined,'grpc-opts': config.net === 'grpc' ? { 'grpc-service-name': config.path || ''} : undefined,};}
-    function parseTrojan(link) {const url = new URL(link);const params = url.searchParams;return {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'trojan', server: url.hostname, port: parseInt(url.port, 10),password: url.username, udp: true, sni: params.get('sni') || url.hostname,servername: params.get('sni') || url.hostname,alpn: params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"],};}
-    function parseTuic(link) {const url = new URL(link);const params = url.searchParams;const [uuid, password] = url.username.split(':');return {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'tuic', server: url.hostname, port: parseInt(url.port, 10),uuid: uuid, password: password,servername: params.get('sni') || url.hostname,udp: true,'congestion-controller': params.get('congestion_control') || 'bbr','udp-relay-mode': params.get('udp_relay_mode') || 'native',alpn: params.get('alpn') ? params.get('alpn').split(',') : ["h3"],'disable-sni': params.get('disable_sni') === 'true',};}
-    function parseHysteria2(link) {const url = new URL(link);const params = url.searchParams;return {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'hysteria2', server: url.hostname, port: parseInt(url.port, 10),password: url.username,servername: params.get('sni') || url.hostname,udp: true,'skip-cert-verify': params.get('insecure') === '1' || params.get('skip_cert_verify') === 'true',obfs: params.get('obfs'),'obfs-password': params.get('obfs-password'),};}
+    function parseVless(link) {try {const url = new URL(link);const params = url.searchParams;const proxy = {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'vless',server: url.hostname,port: parseInt(url.port, 10),uuid: url.username,network: params.get('type') || 'tcp',tls: params.get('security') === 'tls' || params.get('security') === 'reality',udp: true,flow: params.get('flow') || '','client-fingerprint': params.get('fp') || 'chrome',};if (proxy.tls) {proxy.servername = params.get('sni') || url.hostname;proxy.alpn = params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"];if (params.get('security') === 'reality') {proxy['reality-opts'] = { 'public-key': params.get('pbk'), 'short-id': params.get('sid') };}}if (proxy.network === 'ws') proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || url.hostname } };if (proxy.network === 'grpc') proxy['grpc-opts'] = { 'grpc-service-name': params.get('serviceName') || '' };return proxy;} catch(e) { console.error("Failed to parse VLESS link:", link, e); return null; } }
+    function parseVmess(link) {try {const jsonStr = atob(link.substring('vmess://'.length));const config = JSON.parse(jsonStr);return {name: config.ps || config.add, type: 'vmess', server: config.add, port: parseInt(config.port, 10),uuid: config.id, alterId: config.aid, cipher: config.scy || 'auto',tls: config.tls === 'tls', network: config.net || 'tcp', udp: true,servername: config.sni || undefined,'ws-opts': config.net === 'ws' ? { path: config.path || '/', headers: { Host: config.host || config.add } } : undefined,'h2-opts': config.net === 'h2' ? { path: config.path || '/', host: [config.host || config.add] } : undefined,'grpc-opts': config.net === 'grpc' ? { 'grpc-service-name': config.path || ''} : undefined,};} catch(e) { console.error("Failed to parse VMess link:", link, e); return null; } }
+    function parseTrojan(link) {try {const url = new URL(link);const params = url.searchParams;return {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'trojan', server: url.hostname, port: parseInt(url.port, 10),password: url.username, udp: true, sni: params.get('sni') || url.hostname,servername: params.get('sni') || url.hostname,alpn: params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"],};} catch(e) { console.error("Failed to parse Trojan link:", link, e); return null; } }
+    function parseTuic(link) {try {const url = new URL(link);const params = url.searchParams;const [uuid, password] = url.username.split(':');return {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'tuic', server: url.hostname, port: parseInt(url.port, 10),uuid: uuid, password: password,servername: params.get('sni') || url.hostname,udp: true,'congestion-controller': params.get('congestion_control') || 'bbr','udp-relay-mode': params.get('udp_relay_mode') || 'native',alpn: params.get('alpn') ? params.get('alpn').split(',') : ["h3"],'disable-sni': params.get('disable_sni') === 'true',};} catch(e) { console.error("Failed to parse TUIC link:", link, e); return null; } }
+    function parseHysteria2(link) {try {const url = new URL(link);const params = url.searchParams;return {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'hysteria2', server: url.hostname, port: parseInt(url.port, 10),password: url.username,servername: params.get('sni') || url.hostname,udp: true,'skip-cert-verify': params.get('insecure') === '1' || params.get('skip_cert_verify') === 'true',obfs: params.get('obfs'),'obfs-password': params.get('obfs-password'),};} catch(e) { console.error("Failed to parse Hysteria2 link:", link, e); return null; } }
     function generateClashConfig(proxies) {const proxyNames = proxies.map(p => p.name);const config = {'port': 7890, 'socks-port': 7891, 'allow-lan': false,'mode': 'rule', 'log-level': 'info', 'external-controller': '127.0.0.1:9090','proxies': proxies,'proxy-groups': [{'name': 'PROXY', 'type': 'select', 'proxies': ['DIRECT', 'REJECT', ...proxyNames],}],'rules': ['DOMAIN-SUFFIX,google.com,PROXY', 'DOMAIN-SUFFIX,github.com,PROXY','DOMAIN-SUFFIX,youtube.com,PROXY', 'DOMAIN-SUFFIX,telegram.org,PROXY','GEOIP,CN,DIRECT', 'MATCH,PROXY',],};const serializeClash = (config) => {let out = "";const simpleDump = (key, val) => { if(val !== undefined) out += `${key}: ${val}\n`};simpleDump('port', config.port);simpleDump('socks-port', config['socks-port']);simpleDump('allow-lan', config['allow-lan']);simpleDump('mode', config.mode);simpleDump('log-level', config['log-level']);simpleDump('external-controller', config['external-controller']);out += "proxies:\n";for (const proxy of config.proxies) {out += "  - {";let first = true;for (const [k, v] of Object.entries(proxy)) {if (v === undefined) continue;if (!first) out += ", ";if (typeof v === 'object' && v !== null && !Array.isArray(v)) {out += `${k}: {${Object.entries(v).map(([sk, sv]) => `${sk}: ${JSON.stringify(sv)}`).join(', ')}}`;} else {out += `${k}: ${JSON.stringify(v)}`;}first = false;}out += "}\n";}out += "proxy-groups:\n";for(const group of config['proxy-groups']) {out += `- name: ${JSON.stringify(group.name)}\n  type: ${group.type}\n  proxies:\n`;for(const proxyName of group.proxies){out += `    - ${JSON.stringify(proxyName)}\n`;}}out += "rules:\n";for (const rule of config.rules) {out += `  - ${rule}\n`;}return out;};return serializeClash(config);}
     function generateSingboxConfig(proxies) {const outbounds = proxies.map(clashProxy => {const {name, type, server, port, password, uuid, alterId, cipher,network, tls, udp, flow, 'client-fingerprint': fingerprint,servername, alpn, 'reality-opts': realityOpts,'ws-opts': wsOpts, 'grpc-opts': grpcOpts,'congestion-controller': congestion, 'udp-relay-mode': udpRelayMode,'skip-cert-verify': skipCertVerify, obfs, 'obfs-password': obfsPassword} = clashProxy;const singboxOutbound = {tag: name,type: type,server: server,server_port: parseInt(port, 10),};if (uuid) singboxOutbound.uuid = uuid;if (password) singboxOutbound.password = password;if (type === 'vless') {if (flow) singboxOutbound.flow = flow;}if (type === 'vmess') {singboxOutbound.alter_id = alterId;singboxOutbound.security = cipher || 'auto';}if (type === 'ssr') {singboxOutbound.method = cipher; singboxOutbound.protocol = clashProxy.protocol; singboxOutbound.protocol_param = clashProxy['protocol-param']; singboxOutbound.obfs = obfs; singboxOutbound.obfs_param = clashProxy['obfs-param'];}if (tls) {singboxOutbound.tls = {enabled: true,server_name: servername || server,alpn: alpn,insecure: skipCertVerify || false,};if (fingerprint) {singboxOutbound.tls.utls = { enabled: true, fingerprint: fingerprint };}if (realityOpts) {singboxOutbound.tls.reality = {enabled: true,public_key: realityOpts['public-key'],short_id: realityOpts['short-id'],};}}if(type === 'hysteria2') {if (obfs && obfsPassword) {singboxOutbound.obfs = { type: 'salamander', password: obfsPassword };}singboxOutbound.up_mbps = 20; singboxOutbound.down_mbps = 100;}if(type === 'tuic') {singboxOutbound.congestion_control = congestion;singboxOutbound.udp_relay_mode = udpRelayMode;singboxOutbound.version = 'v5';}if (network && network !== 'tcp') {singboxOutbound.transport = { type: network };if (network === 'ws' && wsOpts) {singboxOutbound.transport.path = wsOpts.path;if (wsOpts.headers && wsOpts.headers.Host) {singboxOutbound.transport.headers = { Host: wsOpts.headers.Host };}}if (network === 'grpc' && grpcOpts) {singboxOutbound.transport.service_name = grpcOpts['grpc-service-name'];}}return singboxOutbound;});outbounds.push({ type: 'selector', tag: 'PROXY', outbounds: proxies.map(p => p.name).concat(['DIRECT', 'REJECT']) },{ type: 'direct', tag: 'DIRECT' },{ type: 'block', tag: 'REJECT' },{ type: 'dns', tag: 'dns-out' });const config = {log: { level: "info", timestamp: true },inbounds: [{ type: "mixed", tag: "mixed-in", listen: "127.0.0.1", listen_port: 2080 }],outbounds: outbounds,route: {rules: [{ protocol: "dns", outbound: "dns-out" },{ geoip: ["cn"], outbound: "DIRECT" },{ domain_suffix: ["cn", "qq.com", "wechat.com"], outbound: "DIRECT" },{ outbound: "PROXY" }],auto_detect_interface: true},experimental: { clash_api: { external_controller: "127.0.0.1:9090", secret: "" } }};return JSON.stringify(config, null, 2);}
 
@@ -28,16 +119,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const genericResultLink = document.getElementById('generic-result-link');
     const clashResultLink = document.getElementById('clash-result-link');
     const singboxResultLink = document.getElementById('singbox-result-link');
+    const singboxResultDownload = document.getElementById('singbox-result-download');
     const extractBtnText = document.getElementById('extract-btn-text');
     const extractLoader = document.getElementById('extract-loader');
     const errorMessage = document.getElementById('error-message');
     const errorText = document.getElementById('error-text');
     const turnstileWidget = document.querySelector('.cf-turnstile');
 
-
     // --- Event Listeners ---
     conversionForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
+        event.preventDefault(); 
 
         const formData = new FormData(conversionForm);
         const inputData = formData.get('subscription_data').trim();
@@ -61,7 +152,6 @@ document.addEventListener('DOMContentLoaded', () => {
         let conversionSucceeded = false;
 
         try {
-            // 1. 【前端】解析和生成
             const lines = inputData.split(/[\r\n]+/).filter(line => line.trim() !== '');
             let allProxies = [];
             let allShareLinks = [];
@@ -83,21 +173,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const singboxConfig = generateSingboxConfig(allProxies);
             const genericSubContent = btoa(allShareLinks.join('\n'));
 
-            // 2. 【前端】加密
-            const extractionCode = crypto.randomUUID(); 
-            const dataToEncrypt = JSON.stringify({
-                clash: clashConfig,
-                singbox: singboxConfig,
-                generic: genericSubContent
-            });
-            const encryptedData = CryptoJS.AES.encrypt(dataToEncrypt, extractionCode).toString();
-            
-            // 3. 【前端】发送加密数据到后端
             const requestBody = {
-                extractionCode: extractionCode,
-                encryptedData: encryptedData,
-                expirationDays: expirationSelect.value,
-                turnstileToken: turnstileToken, // 发送令牌
+                subscription_data: { // 将所有配置打包
+                    clash: clashConfig,
+                    singbox: singboxConfig,
+                    generic: genericSubContent
+                },
+                expirationDays: expirationDays,
+                turnstileToken: turnstileToken,
             };
 
             const response = await fetch('/convert', {
@@ -114,11 +197,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
 
             if (result.success) {
-                extractionCodeDisplay.textContent = extractionCode;
+                extractionCodeDisplay.textContent = result.extractionCode;
                 convertResultArea.classList.remove('hidden');
                 conversionSucceeded = true;
             } else {
-                 throw new Error('转换失败，但未提供明确原因。');
+                 throw new Error(result.message || '转换失败，但未提供明确原因。');
             }
         } catch (error) {
             showError(error.message);
@@ -156,18 +239,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
             
             if(result.success) {
-                const decryptedBytes = CryptoJS.AES.decrypt(result.encryptedData, extractionCode);
-                const decryptedText = decryptedBytes.toString(CryptoJS.enc.Utf8);
-                
-                if (!decryptedText) {
-                    throw new Error("解密失败！提取码可能不正确。");
-                }
-                
-                const configs = JSON.parse(decryptedText);
+                const configs = result.configs;
 
                 const clashBlob = new Blob([configs.clash], { type: 'text/plain;charset=utf-8' });
                 const singboxBlob = new Blob([configs.singbox], { type: 'application/json;charset=utf-8' });
-                const genericBlob = new Blob([atob(configs.generic)], { type: 'text/plain;charset=utf-8' }); 
+                const genericBlob = new Blob([atob(configs.generic)], { type: 'text/plain;charset=utf-8' });
                 
                 clashResultLink.href = URL.createObjectURL(clashBlob);
                 clashResultLink.textContent = "在浏览器中预览/复制 (Clash)";
