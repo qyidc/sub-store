@@ -1,12 +1,12 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers! (KV临时链接最终版)
+ * 欢迎来到 Cloudflare Workers! (永久保存与删除最终版)
  * =================================================================================
  *
  * 【架构定型】:
- * 1. 【引入KV】: 使用Cloudflare KV作为“阅后即焚”的临时存储，用于存放解密后的明文配置。
- * 2. 【混合模式】: 长期数据在R2中端到端加密存储；临时生成的订阅链接通过KV提供，并设置极短TTL。
- * 3. 【API增强】: 新增 /stage-link 接口用于创建临时链接，并新增 /live/... 路由用于提供临时链接的访问。
+ * 1. 【永久保存】: /convert 接口现在支持永久保存选项。
+ * 2. 【安全删除】: 新增 /delete 接口，允许用户通过提取码删除其存储的加密数据。
+ * 3. 【功能完备】: 这是为当前所有功能设计的最终稳定版后端代码。
  */
 
 // =================================================================================
@@ -73,12 +73,27 @@ const corsHeaders = {
               return new Response('Missing extraction code or encrypted data.', { status: 400, headers: corsHeaders });
           }
           const r2Key = `e2ee/${extractionCode}`;
+          
           const days = parseInt(expirationDays);
-          let expiration;
-          if (days === 0) { expiration = new Date(Date.now() + 5 * 60 * 1000); } 
-          else { expiration = new Date(Date.now() + (days || 7) * 24 * 60 * 60 * 1000); }
-          await env.SUB_STORE.put(r2Key, encryptedData, { httpMetadata: { contentType: 'application/octet-stream' }, expires: expiration });
-          return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+          const r2Options = { httpMetadata: { contentType: 'application/octet-stream' } };
+  
+          // 【升级】: 如果days为-1，则不设置expires属性，实现永久保存
+          if (days >= 0) {
+              let expiration;
+              if (days === 0) {
+                  expiration = new Date(Date.now() + 5 * 60 * 1000); 
+              } else {
+                  expiration = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+              }
+              r2Options.expires = expiration;
+          }
+  
+          await env.SUB_STORE.put(r2Key, encryptedData, r2Options);
+  
+          return new Response(JSON.stringify({ success: true }), {
+              headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+  
       } catch (error) {
           console.error('Storage error:', error);
           return new Response(`Error storing data: ${error.message}`, { status: 500, headers: corsHeaders });
@@ -126,52 +141,67 @@ const corsHeaders = {
   });
   
   // =================================================================================
-  // 【新增】暂存路由: /stage-link (接收明文，存入KV，返回临时链接)
+  // 【新增】删除路由: /delete
+  // =================================================================================
+  router.post(/^\/delete$/, async ({ request, env }) => {
+      try {
+          const { extractionCode } = await request.json();
+          if (!extractionCode) {
+              return new Response("需要提供提取码。", { status: 400, headers: corsHeaders });
+          }
+  
+          const r2Key = `e2ee/${extractionCode}`;
+  
+          // 先检查文件是否存在，以提供更友好的反馈
+          const object = await env.SUB_STORE.head(r2Key);
+          if (object === null) {
+              return new Response("提取码无效或链接已被删除/已过期。", { status: 404, headers: corsHeaders });
+          }
+  
+          // 删除文件
+          await env.SUB_STORE.delete(r2Key);
+  
+          return new Response(JSON.stringify({ success: true, message: `提取码为 "${extractionCode.substring(0,8)}..." 的链接已成功删除。` }), {
+              headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+  
+      } catch (e) {
+          console.error('Deletion error:', e);
+          return new Response(`删除时发生错误: ${e.message}`, { status: 500, headers: corsHeaders });
+      }
+  });
+  
+  
+  // =================================================================================
+  // 暂存和临时链接路由
   // =================================================================================
   router.post(/^\/stage-link$/, async ({ request, env }) => {
       try {
-          if (!env.TEMP_SUBS) {
-              throw new Error("KV namespace 'TEMP_SUBS' is not configured on this worker.");
-          }
+          if (!env.TEMP_SUBS) { throw new Error("KV namespace 'TEMP_SUBS' is not configured on this worker."); }
           const { type, content } = await request.json();
-          if (!type || !content) {
-              return new Response("Type and content are required.", { status: 400, headers: corsHeaders });
-          }
+          if (!type || !content) { return new Response("Type and content are required.", { status: 400, headers: corsHeaders }); }
           const tempId = crypto.randomUUID();
-          // 将明文存入KV，并设置60秒后自动过期
           await env.TEMP_SUBS.put(tempId, content, { expirationTtl: 60 });
           const urlBase = new URL(request.url).origin;
           const liveUrl = `${urlBase}/live/${tempId}`;
-          return new Response(JSON.stringify({ success: true, url: liveUrl }), {
-              headers: { 'Content-Type': 'application/json', ...corsHeaders }
-          });
+          return new Response(JSON.stringify({ success: true, url: liveUrl }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
       } catch (e) {
           console.error('Staging error:', e);
           return new Response(`Error staging link: ${e.message}`, { status: 500, headers: corsHeaders });
       }
   });
   
-  
-  // =================================================================================
-  // 【新增】临时链接访问路由: /live/:id
-  // =================================================================================
   router.get(/^\/live\/(?<id>.+)$/, async ({ params, env }) => {
       const { id } = params;
       if (!env.TEMP_SUBS) { return new Response("Temporary storage is not configured.", { status: 500 }); }
       const content = await env.TEMP_SUBS.get(id, { type: "text" });
-      if (content === null) {
-          return new Response("Link expired or not found.", { status: 404 });
-      }
-      // 实现一次性链接：获取后立即删除 (可选)
-      // await env.TEMP_SUBS.delete(id);
-      return new Response(content, {
-          headers: { 'Content-Type': 'text/plain; charset=utf-8' }
-      });
+      if (content === null) { return new Response("Link expired or not found.", { status: 404 }); }
+      return new Response(content, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
   });
   
   
   // =================================================================================
-  // 静态资源服务 (Serving Static Assets)
+  // 静态资源服务
   // =================================================================================
   async function serveStaticAsset({ request, env }) {
       const url = new URL(request.url);
@@ -189,11 +219,10 @@ const corsHeaders = {
   }
   
   // =================================================================================
-  // Worker 入口点 (Entry Point)
+  // Worker 入口点
   // =================================================================================
   export default {
       async fetch(request, env, ctx) {
           return router.handle(request, env, ctx);
       },
-  };
-  
+  };  

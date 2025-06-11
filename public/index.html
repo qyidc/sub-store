@@ -29,12 +29,13 @@
                         <textarea id="sub-input" rows="8" class="block w-full text-sm text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500 p-2.5 transition" placeholder="vless://...&#10;https://example.com/sub (支持远程订阅)"></textarea>
                     </div>
                     <div>
-                        <label for="expiration-select" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">长期链接有效期</label>
+                        <label for="expiration-select" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">链接有效期</label>
                         <select id="expiration-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white">
                             <option value="0" selected>会话 (5分钟)</option>
                             <option value="1">1 天</option>
                             <option value="7">7 天</option>
                             <option value="30">30 天</option>
+                            <option value="-1">永久</option>
                         </select>
                     </div>
                     <button id="convert-btn" class="w-full text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 dark:focus:ring-blue-800 font-medium rounded-lg text-sm px-5 py-3 text-center transition-all duration-200 ease-in-out flex items-center justify-center">
@@ -54,54 +55,48 @@
                 </main>
             </div>
 
-            <!-- Part 2: Extraction Area -->
+            <!-- Part 2: Extraction & Deletion Area -->
             <div class="w-full mt-8 lg:mt-0">
                 <header class="text-center mb-8">
-                    <h1 class="text-4xl font-bold text-gray-900 dark:text-white">凭码解密</h1>
-                    <p class="mt-2 text-lg text-gray-500 dark:text-gray-400">在您的浏览器中安全地解密并提取链接</p>
+                    <h1 class="text-4xl font-bold text-gray-900 dark:text-white">链接管理</h1>
+                    <p class="mt-2 text-lg text-gray-500 dark:text-gray-400">凭码解密或删除已保存的链接</p>
                 </header>
-                <main class="w-full bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
+                <main class="w-full bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 space-y-6">
                      <div>
                         <label for="extract-code-input" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">私密提取码</label>
-                        <input type="text" id="extract-code-input" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-green-500 focus:border-green-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="输入朋友分享给您的提取码">
+                        <input type="text" id="extract-code-input" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-green-500 focus:border-green-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="输入要操作的提取码">
                     </div>
-                    <button id="extract-btn" class="w-full text-white bg-green-600 hover:bg-green-700 focus:ring-4 focus:ring-green-300 dark:focus:ring-green-800 font-medium rounded-lg text-sm px-5 py-3 text-center transition-all duration-200 ease-in-out flex items-center justify-center">
-                        <span id="extract-btn-text">解密并生成临时链接</span>
-                        <svg id="extract-loader" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                    </button>
+                    <!-- Action Buttons Wrapper -->
+                    <div class="flex flex-col sm:flex-row gap-4">
+                        <button id="extract-btn" class="w-full text-white bg-green-600 hover:bg-green-700 focus:ring-4 focus:ring-green-300 dark:focus:ring-green-800 font-medium rounded-lg text-sm px-5 py-3 text-center transition-all duration-200 ease-in-out flex items-center justify-center">
+                            <span id="extract-btn-text">解密并生成</span>
+                            <svg id="extract-loader" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        </button>
+                        <button id="delete-btn" class="w-full text-white bg-red-600 hover:bg-red-700 focus:ring-4 focus:ring-red-300 dark:focus:ring-red-800 font-medium rounded-lg text-sm px-5 py-3 text-center transition-all duration-200 ease-in-out flex items-center justify-center">
+                            <span id="delete-btn-text">永久删除</span>
+                             <svg id="delete-loader" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        </button>
+                    </div>
+
                     <!-- Extraction Result Area -->
                     <div id="extract-result-area" class="hidden space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                         <h3 class="text-lg font-semibold text-gray-800 dark:text-white">✅ 临时链接已生成！</h3>
-                        <!-- 【新增】倒计时器 -->
                         <p class="text-sm text-red-500 font-semibold text-center -mt-2">此链接将在 <span id="countdown-timer" class="font-bold">60</span> 秒后失效</p>
-                        
-                        <!-- Generic Sub Link -->
                         <div class="p-4 bg-yellow-50 dark:bg-yellow-900/50 rounded-lg border border-yellow-200 dark:border-yellow-800">
                             <div class="flex items-center justify-between">
-                                <div>
-                                    <p class="font-semibold text-yellow-800 dark:text-yellow-200">通用订阅链接 (V2RayN等)</p>
-                                    <a id="generic-result-link" href="#" target="_blank" class="text-xs text-blue-500 break-all pr-2 hover:underline"></a>
-                                </div>
+                                <div><p class="font-semibold text-yellow-800 dark:text-yellow-200">通用订阅链接 (V2RayN等)</p><a id="generic-result-link" href="#" target="_blank" class="text-xs text-blue-500 break-all pr-2 hover:underline"></a></div>
                                 <button class="copy-btn px-2 py-1 text-xs bg-gray-200 dark:bg-gray-600 rounded" data-clipboard-target="#generic-result-link">复制</button>
                             </div>
                         </div>
-                        <!-- Clash Link -->
                         <div class="p-4 bg-gray-100 dark:bg-gray-700 rounded-lg">
                             <div class="flex items-center justify-between">
-                                <div>
-                                    <p class="font-semibold text-gray-900 dark:text-white">Clash 订阅链接</p>
-                                    <a id="clash-result-link" href="#" target="_blank" class="text-xs text-blue-500 break-all pr-2 hover:underline"></a>
-                                </div>
+                                <div><p class="font-semibold text-gray-900 dark:text-white">Clash 订阅链接</p><a id="clash-result-link" href="#" target="_blank" class="text-xs text-blue-500 break-all pr-2 hover:underline"></a></div>
                                 <button class="copy-btn px-2 py-1 text-xs bg-gray-200 dark:bg-gray-600 rounded" data-clipboard-target="#clash-result-link">复制</button>
                             </div>
                         </div>
-                         <!-- Singbox Link -->
                         <div class="p-4 bg-gray-100 dark:bg-gray-700 rounded-lg">
                             <div class="flex items-center justify-between">
-                                <div>
-                                    <p class="font-semibold text-gray-900 dark:text-white">Sing-box 下载链接</p>
-                                    <a id="singbox-result-link" href="#" target="_blank" class="text-xs text-blue-500 break-all pr-2 hover:underline">下载配置文件</a>
-                                </div>
+                                <div><p class="font-semibold text-gray-900 dark:text-white">Sing-box 下载链接</p><a id="singbox-result-link" href="#" target="_blank" class="text-xs text-blue-500 break-all pr-2 hover:underline">下载配置文件</a></div>
                             </div>
                         </div>
                     </div>
@@ -109,8 +104,21 @@
             </div>
         </div>
 
-        <div id="error-message" class="hidden fixed bottom-5 right-5 p-4 text-sm text-white bg-red-600 rounded-lg shadow-xl transition-opacity duration-300" role="alert">
-            <span class="font-medium">错误:</span> <span id="error-text"></span>
+        <!-- Universal Message Area (can show success or error) -->
+        <div id="message-area" class="hidden fixed bottom-5 right-5 p-4 text-sm text-white rounded-lg shadow-xl transition-opacity duration-300" role="alert">
+            <span class="font-medium" id="message-title"></span> <span id="message-text"></span>
+        </div>
+
+        <!-- 【新增】Confirmation Modal -->
+        <div id="confirmation-modal" class="hidden fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md text-center">
+                <h3 class="text-lg font-bold text-gray-900 dark:text-white">确认操作</h3>
+                <p id="modal-text" class="text-sm text-gray-600 dark:text-gray-300 my-4">您确定要永久删除这个链接吗？此操作无法撤销。</p>
+                <div class="flex justify-center gap-4">
+                    <button id="cancel-delete-btn" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500">取消</button>
+                    <button id="confirm-delete-btn" class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700">确认删除</button>
+                </div>
+            </div>
         </div>
         
         <footer class="mt-8 text-center text-sm text-gray-500 dark:text-gray-400">

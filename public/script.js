@@ -30,15 +30,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const singboxResultLink = document.getElementById('singbox-result-link');
     const extractBtnText = document.getElementById('extract-btn-text');
     const extractLoader = document.getElementById('extract-loader');
-    const errorMessage = document.getElementById('error-message');
-    const errorText = document.getElementById('error-text');
+    const messageArea = document.getElementById('message-area');
+    const messageTitle = document.getElementById('message-title');
+    const messageText = document.getElementById('message-text');
     const countdownTimer = document.getElementById('countdown-timer');
+    const deleteCodeInput = document.getElementById('delete-code-input');
+    const deleteBtn = document.getElementById('delete-btn');
+    const deleteBtnText = document.getElementById('delete-btn-text');
+    const deleteLoader = document.getElementById('delete-loader');
+    const confirmationModal = document.getElementById('confirmation-modal');
+    const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
+    const cancelDeleteBtn = document.getElementById('cancel-delete-btn');
 
-    let countdownInterval; // 【新增】用于存储计时器的引用
+    let countdownInterval;
+    let codeToDelete = '';
 
-    /**
-     * 【新增】: 通过后端代理获取远程订阅内容的函数
-     */
     async function fetchRemoteSubscription(url) {
         setLoadingStatus("正在获取远程订阅...");
         const response = await fetch('/proxy-fetch', {
@@ -64,7 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const inputData = subInput.value.trim();
         if (!inputData) { return showError('订阅链接或分享链接不能为空。'); }
         setLoading(convertBtn, convertLoader, convertBtnText, true);
-        hideError();
+        hideMessage();
         convertResultArea.classList.add('hidden');
 
         try {
@@ -136,9 +142,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const extractionCode = extractCodeInput.value.trim();
         if (!extractionCode) { return showError('提取码不能为空。'); }
         setLoading(extractBtn, extractLoader, extractBtnText, true);
-        hideError();
+        hideMessage();
         extractResultArea.classList.add('hidden');
-        if (countdownInterval) clearInterval(countdownInterval); // 清除旧的计时器
+        if (countdownInterval) clearInterval(countdownInterval);
 
         try {
             const response = await fetch('/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ extractionCode }) });
@@ -152,29 +158,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 const configs = JSON.parse(decryptedText);
 
                 async function stageLink(type, content) {
-                    const res = await fetch('/stage-link', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ type, content })
-                    });
+                    const res = await fetch('/stage-link', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, content }) });
                     if (!res.ok) throw new Error(`生成临时${type}链接失败`);
                     return (await res.json()).url;
                 }
 
                 clashResultLink.href = await stageLink('clash', configs.clash);
                 clashResultLink.textContent = "点击复制Clash订阅链接";
-
                 genericResultLink.href = await stageLink('generic', atob(configs.generic));
                 genericResultLink.textContent = "点击复制通用订阅链接";
-                
-                // For singbox, we create a direct download link
                 const singboxBlob = new Blob([configs.singbox], { type: 'application/json;charset=utf-8' });
                 singboxResultLink.href = URL.createObjectURL(singboxBlob);
                 singboxResultLink.download = `singbox-config-${extractionCode.substring(0,8)}.json`;
 
                 extractResultArea.classList.remove('hidden');
 
-                // Start countdown
                 let secondsLeft = 60;
                 countdownTimer.textContent = secondsLeft;
                 countdownInterval = setInterval(() => {
@@ -196,7 +194,41 @@ document.addEventListener('DOMContentLoaded', () => {
              setLoading(extractBtn, extractLoader, extractBtnText, false);
         }
     });
+    
+    // 【新增】删除逻辑
+    deleteBtn.addEventListener('click', () => {
+        const code = extractCodeInput.value.trim();
+        if (!code) { return showError('请输入要删除的提取码。'); }
+        codeToDelete = code; // 暂存要删除的码
+        confirmationModal.classList.remove('hidden');
+    });
 
+    cancelDeleteBtn.addEventListener('click', () => {
+        confirmationModal.classList.add('hidden');
+        codeToDelete = '';
+    });
+
+    confirmDeleteBtn.addEventListener('click', async () => {
+        confirmationModal.classList.add('hidden');
+        setLoading(deleteBtn, deleteLoader, deleteBtnText, true);
+        hideMessage();
+
+        try {
+            const response = await fetch('/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ extractionCode: codeToDelete }) });
+            const result = await response.json(); 
+            if (!response.ok) { throw new Error(result.message || result || `服务器错误: ${response.status}`); }
+            showSuccess(result.message || '删除成功！');
+            extractCodeInput.value = ''; // 清空输入框
+        } catch (error) {
+            showError(error.message);
+        } finally {
+            setLoading(deleteBtn, deleteLoader, deleteBtnText, false);
+            codeToDelete = '';
+        }
+    });
+
+
+    // --- Helper Functions and other listeners ---
     document.body.addEventListener('click', (event) => {
         const target = event.target;
         if (target.classList.contains('copy-btn')) {
@@ -215,25 +247,30 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
-
     function setLoading(btn, loader, btnText, isLoading) {
         btn.disabled = isLoading;
         if (isLoading) { btn.classList.add('cursor-not-allowed'); loader.classList.remove('hidden'); btnText.classList.add('hidden');
         } else { btn.classList.remove('cursor-not-allowed'); loader.classList.add('hidden'); btnText.classList.remove('hidden'); }
     }
-    let errorTimeout;
-    function showError(message) {
-        clearTimeout(errorTimeout);
+    let messageTimeout;
+    function showMessage(message, isError = true) {
+        clearTimeout(messageTimeout);
         const formattedMessage = String(message).replace(/\n/g, '<br>');
-        errorText.innerHTML = formattedMessage;
-        errorMessage.classList.remove('hidden', 'opacity-0');
-        errorMessage.classList.add('opacity-100');
-        errorTimeout = setTimeout(() => {
-            errorMessage.classList.add('opacity-0');
-            setTimeout(() => errorMessage.classList.add('hidden'), 8000);
+        messageTitle.textContent = isError ? "错误:" : "成功:";
+        messageText.innerHTML = formattedMessage;
+        messageArea.classList.toggle('bg-red-600', isError);
+        messageArea.classList.toggle('bg-green-600', !isError);
+        messageArea.classList.remove('hidden', 'opacity-0');
+        messageArea.classList.add('opacity-100');
+        messageTimeout = setTimeout(() => {
+            messageArea.classList.add('opacity-0');
+            setTimeout(() => messageArea.classList.add('hidden'), 300);
         }, 8000); 
     }
-    function hideError() {
-        errorMessage.classList.add('hidden', 'opacity-0');
+    const showError = (message) => showMessage(message, true);
+    const showSuccess = (message) => showMessage(message, false);
+
+    function hideMessage() {
+        messageArea.classList.add('hidden', 'opacity-0');
     }
 });
