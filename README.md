@@ -89,6 +89,18 @@ demo [sub.otwx.top](https://sub.otwx.top)
 
 \[R2存储桶绑定设置的界面截图\]完成以上步骤后，您的Worker就获得了读写这个R2存储桶的权限。
 
+### **4.3 如何创建并绑定KV空间**
+
+**请您确认已经按照我们之前的指南，创建了一个名为 TEMP_SUBS 的KV命名空间，并将其正确地绑定到了您的Worker项目设置中。
+同时，请检查您的 wrangler.toml 文件，确保其中包含了类似下面这样的KV配置代码，这是 wrangler 部署时所必需的。
+
+Ini, TOML
+```
+[[kv_namespaces]]
+binding = "TEMP_SUBS"
+id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+preview_id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+```
 ### **5\. 系统加密方式与数据安全**
 
 本项目将用户数据安全置于最高优先级，采用了**端到端加密 (End-to-End Encryption, E2EE)** 模型。
@@ -99,42 +111,7 @@ demo [sub.otwx.top](https://sub.otwx.top)
   * 这个密钥**仅在生成和提取时存在于用户的浏览器内存中**，它从未以任何形式被发送到服务器或被存储。  
 * **安全保障**: 这种架构意味着，**本应用的服务提供者（即您本人）也无法查看或解密任何用户的订阅内容**。这是最高级别的隐私保护承诺，能让使用者完全放心其数据不会被盗用或审查。
 
-### **6\. 人机验证与自动化部署 (含详细配置)**
-
-#### **6.1 人机验证 (Cloudflare Turnstile) \- 详细配置指南**
-
-为了启用人机验证功能，您需要从Cloudflare获取一个“站点密钥 (Site Key)”和一个“秘密密钥 (Secret Key)”。
-
-1. **在Cloudflare创建Turnstile站点**  
-   * 登录您的 [Cloudflare 仪表盘](https://dash.cloudflare.com)。  
-   * 在左侧菜单中，找到并点击 **Turnstile**。  
-   * 点击 **添加站点 (Add site)** 按钮。  
-   * **站点名称 (Site name)**：给它取一个您能识别的名字，例如 我的订阅转换器。  
-   * **域名 (Domain)**：输入您部署此应用的域名。**重要提示**：这里需要同时填写您计划使用的**自定义域名**（如 sub.otwx.top）和Cloudflare提供的**免费域名**（如 your-worker-name.workers.dev）。您可以点击“添加其他域”来输入多个。  
-   * **小组件模式 (Widget Mode)**：选择 **“托管 (Managed)”**。这是最智能的模式，它会自动判断是否需要向用户展示交互式挑战。  
-   * 点击 **创建 (Create)**。  
-2. **获取密钥**  
-   * 创建成功后，您会看到一个页面显示您的密钥。请复制并妥善保管这两个值：  
-     * **站点密钥 (Site Key)**：这个是公开的，将用于前端 index.html。  
-     * **秘密密钥 (Secret Key)**：这个**非常重要，绝不能泄露**。  
-3. **在Worker中配置秘密密钥 (Secret Key)**  
-   * 回到Cloudflare仪表盘，进入 **Workers & Pages** \-\> 您的Worker项目。  
-   * 点击 **设置 (Settings)** \-\> **变量 (Variables)**。  
-   * 在 **机密变量 (Encrypted Variables)** 部分（或旧版的“环境变量”下），点击 **添加变量 (Add variable)**。  
-   * **变量名称 (Variable name)**：**必须准确地输入 TURNSTILE\_SECRET**。  
-   * **值 (Value)**：将您上一步获取到的 **秘密密钥 (Secret Key)** 粘贴到这里。  
-   * 点击 **加密并保存 (Encrypt and Save)**。
-
-\[Worker中配置机密变量的界面截图\]
-
-4. **在前端HTML中配置站点密钥 (Site Key)**  
-   * 打开您本地项目中的 public/index.html 文件。  
-   * 找到下面这行代码：  
-     \<div class="cf-turnstile" data-sitekey="YOUR\_SITE\_KEY\_HERE"\>\</div\>
-
-   * 将 YOUR\_SITE\_KEY\_HERE 这个占位符，**替换为您真实的站点密钥 (Site Key)**。
-
-#### **6.2 自动化部署 (GitHub Actions) \- 详细配置指南**
+#### **6\. 自动化部署 (GitHub Actions) \- 详细配置指南**
 
 使用GitHub Actions可以实现“代码推送到GitHub，网站自动更新”的现代化开发流程。
 
