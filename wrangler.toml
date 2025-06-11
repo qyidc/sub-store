@@ -13,3 +13,8 @@ compatibility_date = "2023-10-30"
 binding = "SUB_STORE" # 在Worker代码中，将通过 env.SUB_STORE 来访问这个R2桶
 bucket_name = "sub-store-bucket" # 请替换为您实际创建的R2存储桶名称
 # preview_bucket_name = "sub-store-bucket-preview" # 开发预览时使用的桶，可以和生产环境一样
+
+[[kv_namespaces]]
+binding = "TEMP_SUBS"
+id = "8c7f09e2bd234dc3bfc0745fbde27e73"
+preview_id = "8c7f09e2bd234dc3bfc0745fbde27e73"
