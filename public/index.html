@@ -18,22 +18,18 @@
             <!-- Part 1: Conversion Area -->
             <div class="w-full">
                 <header class="text-center mb-8">
-                    <h1 class="text-4xl font-bold text-gray-900 dark:text-white">最安全订阅转换工具</h1>
+                    <h1 class="text-4xl font-bold text-gray-900 dark:text-white">安全订阅转换</h1>
                     <p class="mt-2 text-lg text-gray-500 dark:text-gray-400">
                         <span class="font-semibold text-green-500">端到端加密</span> · 生成一个私密提取码来分享
                     </p>
                 </header>
                 <main class="w-full bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
-                    <!-- Input Area -->
                     <div>
                         <label for="sub-input" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">订阅链接 / 分享链接 (支持多行)</label>
-                        <div class="relative">
-                            <textarea id="sub-input" rows="8" class="block w-full text-sm text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500 p-2.5 transition" placeholder="vless://...&#10;https://example.com/sub (支持远程订阅)"></textarea>
-                        </div>
+                        <textarea id="sub-input" rows="8" class="block w-full text-sm text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500 p-2.5 transition" placeholder="vless://...&#10;https://example.com/sub (支持远程订阅)"></textarea>
                     </div>
-                    <!-- Expiration Option -->
                     <div>
-                        <label for="expiration-select" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">链接有效期</label>
+                        <label for="expiration-select" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">长期链接有效期</label>
                         <select id="expiration-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white">
                             <option value="0" selected>会话 (5分钟)</option>
                             <option value="1">1 天</option>
@@ -41,12 +37,10 @@
                             <option value="30">30 天</option>
                         </select>
                     </div>
-                    <!-- Action Button -->
                     <button id="convert-btn" class="w-full text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 dark:focus:ring-blue-800 font-medium rounded-lg text-sm px-5 py-3 text-center transition-all duration-200 ease-in-out flex items-center justify-center">
                         <span id="btn-text">加密并生成提取码</span>
                         <svg id="loader" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                     </button>
-                    <!-- Conversion Result Area -->
                     <div id="convert-result-area" class="hidden space-y-3 pt-4 border-t border-gray-200 dark:border-gray-700">
                         <h3 class="text-lg font-semibold text-gray-800 dark:text-white">🎉 生成成功！请使用以下提取码分享。</h3>
                         <div class="p-4 bg-gray-100 dark:bg-gray-700 rounded-lg">
@@ -67,20 +61,20 @@
                     <p class="mt-2 text-lg text-gray-500 dark:text-gray-400">在您的浏览器中安全地解密并提取链接</p>
                 </header>
                 <main class="w-full bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
-                    <!-- Extraction Input -->
                      <div>
                         <label for="extract-code-input" class="block mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">私密提取码</label>
                         <input type="text" id="extract-code-input" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-green-500 focus:border-green-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="输入朋友分享给您的提取码">
                     </div>
-                     <!-- Extraction Button -->
                     <button id="extract-btn" class="w-full text-white bg-green-600 hover:bg-green-700 focus:ring-4 focus:ring-green-300 dark:focus:ring-green-800 font-medium rounded-lg text-sm px-5 py-3 text-center transition-all duration-200 ease-in-out flex items-center justify-center">
-                        <span id="extract-btn-text">解密并提取</span>
+                        <span id="extract-btn-text">解密并生成临时链接</span>
                         <svg id="extract-loader" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                     </button>
                     <!-- Extraction Result Area -->
                     <div id="extract-result-area" class="hidden space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                        <h3 class="text-lg font-semibold text-gray-800 dark:text-white">✅ 解密成功！</h3>
-                        <p class="text-sm text-gray-500 dark:text-gray-400 -mt-2">以下链接已在您本地生成，可安全使用。</p>
+                        <h3 class="text-lg font-semibold text-gray-800 dark:text-white">✅ 临时链接已生成！</h3>
+                        <!-- 【新增】倒计时器 -->
+                        <p class="text-sm text-red-500 font-semibold text-center -mt-2">此链接将在 <span id="countdown-timer" class="font-bold">60</span> 秒后失效</p>
+                        
                         <!-- Generic Sub Link -->
                         <div class="p-4 bg-yellow-50 dark:bg-yellow-900/50 rounded-lg border border-yellow-200 dark:border-yellow-800">
                             <div class="flex items-center justify-between">
@@ -113,17 +107,14 @@
                     </div>
                 </main>
             </div>
-        </div> <!-- End of Main Grid -->
+        </div>
 
-        <!-- Universal Error Message Area -->
         <div id="error-message" class="hidden fixed bottom-5 right-5 p-4 text-sm text-white bg-red-600 rounded-lg shadow-xl transition-opacity duration-300" role="alert">
             <span class="font-medium">错误:</span> <span id="error-text"></span>
         </div>
         
         <footer class="mt-8 text-center text-sm text-gray-500 dark:text-gray-400">
-            <p>由 Cloudflare Workers & R2 强力驱动 · <a href="https://github.com/qyidc/sub-store" target="_blank">git项目地址</a></p>
-            <p>本站仅仅是个转换工具网站，自身不会发布任何的节点信息。</p>
-            <p>本站其它工具：<a href="https://uuid.otwx.top" target="_blank">UUID生成 |  </a><a href="https://base.otwx.top" target="_blank">base64转换</a></p>
+            <p>由 Cloudflare Workers, R2 & KV 强力驱动 · 端到端加密</p>
         </footer>
 
     </div>

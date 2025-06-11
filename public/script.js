@@ -1,8 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
     // #################################################################################
-    //                          协议解析与配置生成模块 (最终修复版)
+    //                          协议解析与配置生成模块 (完整版)
     // #################################################################################
-    
     function b64UrlDecode(str) {try {str = str.replace(/-/g, '+').replace(/_/g, '/');while (str.length % 4) { str += '='; }return atob(str);} catch(e) {console.error("Base64URL Decode Failed for string:", str, e);return "";}}
     function parseShadowsocks(link) {try {if (!link.startsWith("ss://")) throw new Error("Not an SS link");const hashIndex = link.indexOf('#');const name = hashIndex > -1 ? decodeURIComponent(link.substring(hashIndex + 1)) : null;const corePart = hashIndex > -1 ? link.substring(5, hashIndex) : link.substring(5);if (corePart.indexOf('@') === -1) {const decoded = b64UrlDecode(corePart);if (!decoded) throw new Error("SIP002 core part is not valid Base64.");const atIndex = decoded.lastIndexOf('@');if (atIndex === -1) throw new Error("Invalid SIP002 format: missing '@' after decoding.");const authPart = decoded.substring(0, atIndex);const hostPart = decoded.substring(atIndex + 1);const [cipher, password] = authPart.split(':');const [server, port] = hostPart.split(':');if (server && port && cipher && password) {return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };}}else {const atIndex = corePart.lastIndexOf('@');const authPartB64 = corePart.substring(0, atIndex);const hostPart = corePart.substring(atIndex + 1);let cipher, password;const decodedAuth = atob(authPartB64);const colonIndex = decodedAuth.indexOf(':');if (colonIndex > 0) {cipher = decodedAuth.substring(0, colonIndex);password = decodedAuth.substring(colonIndex + 1);} else {throw new Error("Decoded auth part is invalid.");}const hostColonIndex = hostPart.lastIndexOf(':');if (hostColonIndex === -1) throw new Error("Invalid host part: missing port");const server = hostPart.substring(0, hostColonIndex);const port = hostPart.substring(hostColonIndex + 1);if (server && port && cipher && password) {return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };}}} catch (e) {throw new Error(`SS link parsing failed: ${e.message}`);}throw new Error("Could not parse SS link in any known format.");}
     function parseShadowsocksR(link) {try {const decoded = b64UrlDecode(link.substring('ssr://'.length));const mainParts = decoded.split('/?');const requiredParts = mainParts[0].split(':');if (requiredParts.length < 6) throw new Error("Invalid SSR main part");const [server, port, protocol, cipher, obfs, password_b64] = requiredParts;const paramsStr = mainParts.length > 1 ? mainParts[1] : '';const params = new URLSearchParams(paramsStr);const name = params.get('remarks') ? b64UrlDecode(params.get('remarks')) : `${server}:${port}`;const password = b64UrlDecode(password_b64);const obfsParam = params.get('obfsparam') ? b64UrlDecode(params.get('obfsparam')) : '';const protoParam = params.get('protoparam') ? b64UrlDecode(params.get('protoparam')) : '';return { name, type: 'ssr', server, port: parseInt(port, 10), cipher, password, protocol, 'protocol-param': protoParam, obfs, 'obfs-param': obfsParam, udp: true };} catch (e) {throw new Error(`SSR link parsing failed: ${e.message}`);}}
@@ -33,43 +32,37 @@ document.addEventListener('DOMContentLoaded', () => {
     const extractLoader = document.getElementById('extract-loader');
     const errorMessage = document.getElementById('error-message');
     const errorText = document.getElementById('error-text');
+    const countdownTimer = document.getElementById('countdown-timer');
+
+    let countdownInterval; // 【新增】用于存储计时器的引用
 
     /**
      * 【新增】: 通过后端代理获取远程订阅内容的函数
-     * @param {string} url The remote subscription URL.
-     * @returns {Promise<string[]>} A promise that resolves to an array of share links.
      */
     async function fetchRemoteSubscription(url) {
-        console.log(`[FRONTEND LOG] Fetching remote subscription via proxy: ${url}`);
+        setLoadingStatus("正在获取远程订阅...");
         const response = await fetch('/proxy-fetch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url }),
         });
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`获取远程订阅失败 (${url.substring(0, 30)}...): ${errText}`);
-        }
-
+        if (!response.ok) { throw new Error(`获取远程订阅失败: ${await response.text()}`); }
         const content = await response.text();
         try {
-            const decoded = atob(content);
-            return decoded.split(/[\r\n]+/).filter(line => line.trim() !== '');
+            return atob(content).split(/[\r\n]+/).filter(line => line.trim() !== '');
         } catch (e) {
             return content.split(/[\r\n]+/).filter(line => line.trim() !== '');
         }
     }
 
+    function setLoadingStatus(text) {
+        convertBtnText.textContent = text;
+    }
 
     // --- Event Listeners ---
     convertBtn.addEventListener('click', async () => {
         const inputData = subInput.value.trim();
-        if (!inputData) {
-            showError('订阅链接或分享链接不能为空。');
-            return;
-        }
-
+        if (!inputData) { return showError('订阅链接或分享链接不能为空。'); }
         setLoading(convertBtn, convertLoader, convertBtnText, true);
         hideError();
         convertResultArea.classList.add('hidden');
@@ -80,28 +73,20 @@ document.addEventListener('DOMContentLoaded', () => {
             let allShareLinks = [];
             let parsingErrors = [];
 
-            // 使用 for...of 循环来正确处理 await
             for (const line of lines) {
                 try {
                     let linesToParse = [line];
                     if (line.startsWith('http')) {
                         linesToParse = await fetchRemoteSubscription(line);
                     }
-                    
                     for (const singleLink of linesToParse) {
                         if (!singleLink.trim()) continue;
-                        
                         const proxies = parseShareLink(singleLink);
-                        if (proxies && proxies.length > 0) {
-                            const validProxies = proxies.filter(p => p);
-                            if (validProxies.length > 0) {
-                                allProxies.push(...validProxies);
-                                allShareLinks.push(singleLink);
-                            } else {
-                                parsingErrors.push(`- 无法识别的链接格式: "${singleLink.substring(0, 40)}..."`);
-                            }
-                        } else if (singleLink.trim()) {
-                            parsingErrors.push(`- 不支持的链接类型: "${singleLink.substring(0, 40)}..."`);
+                        if (proxies && proxies.length > 0 && proxies.some(p=>p)) {
+                            allProxies.push(...proxies.filter(p => p));
+                            allShareLinks.push(singleLink);
+                        } else {
+                            parsingErrors.push(`- 不支持或无法识别: "${singleLink.substring(0, 40)}..."`);
                         }
                     }
                 } catch (e) {
@@ -111,45 +96,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (allProxies.length === 0) {
                 let finalMessage = "未找到任何可解析的有效代理节点。";
-                if (parsingErrors.length > 0) {
-                    finalMessage += "\n\n解析详情如下:\n" + parsingErrors.join('\n');
-                } else {
-                    finalMessage += " 请检查您输入的链接。";
-                }
+                if (parsingErrors.length > 0) { finalMessage += "\n\n解析详情如下:\n" + parsingErrors.join('\n'); }
                 throw new Error(finalMessage);
             }
 
-            allProxies = allProxies.filter((proxy, index, self) => proxy && proxy.name && index === self.findIndex((p) => p && p.name === proxy.name));
-
-            const clashConfig = generateClashConfig(allProxies);
-            const singboxConfig = generateSingboxConfig(allProxies);
-            const genericSubContent = btoa(allShareLinks.join('\n'));
-
-            const extractionCode = crypto.randomUUID(); 
-            const dataToEncrypt = JSON.stringify({
-                clash: clashConfig,
-                singbox: singboxConfig,
-                generic: genericSubContent
-            });
-            const encryptedData = CryptoJS.AES.encrypt(dataToEncrypt, extractionCode).toString();
-            
-            const requestBody = {
-                extractionCode: extractionCode,
-                encryptedData: encryptedData,
-                expirationDays: expirationSelect.value,
+            setLoadingStatus("正在生成配置...");
+            allProxies = allProxies.filter((p, i, a) => p && p.name && i === a.findIndex(q => q && q.name === p.name));
+            const configs = {
+                clash: generateClashConfig(allProxies),
+                singbox: generateSingboxConfig(allProxies),
+                generic: btoa(allShareLinks.join('\n'))
             };
 
-            const response = await fetch('/convert', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestBody),
-            });
+            setLoadingStatus("正在加密数据...");
+            const extractionCode = crypto.randomUUID(); 
+            const encryptedData = CryptoJS.AES.encrypt(JSON.stringify(configs), extractionCode).toString();
             
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(errText || `服务器错误: ${response.status}`);
-            }
-
+            setLoadingStatus("正在上传...");
+            const requestBody = { extractionCode, encryptedData, expirationDays: expirationSelect.value };
+            const response = await fetch('/convert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
+            if (!response.ok) { throw new Error(await response.text() || `服务器错误: ${response.status}`); }
             const result = await response.json();
 
             if (result.success) {
@@ -162,58 +128,65 @@ document.addEventListener('DOMContentLoaded', () => {
             showError(error.message);
         } finally {
             setLoading(convertBtn, convertLoader, convertBtnText, false);
+            convertBtnText.textContent = "加密并生成提取码";
         }
     });
 
     extractBtn.addEventListener('click', async() => {
         const extractionCode = extractCodeInput.value.trim();
-        if (!extractionCode) {
-            showError('提取码不能为空。');
-            return;
-        }
-        
+        if (!extractionCode) { return showError('提取码不能为空。'); }
         setLoading(extractBtn, extractLoader, extractBtnText, true);
         hideError();
         extractResultArea.classList.add('hidden');
-        
+        if (countdownInterval) clearInterval(countdownInterval); // 清除旧的计时器
+
         try {
-            const response = await fetch('/extract', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ extractionCode }),
-            });
-
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(errText || `服务器错误: ${response.status}`);
-            }
-
+            const response = await fetch('/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ extractionCode }) });
+            if (!response.ok) { throw new Error(await response.text() || `服务器错误: ${response.status}`); }
             const result = await response.json();
             
             if(result.success) {
                 const decryptedBytes = CryptoJS.AES.decrypt(result.encryptedData, extractionCode);
                 const decryptedText = decryptedBytes.toString(CryptoJS.enc.Utf8);
-                
-                if (!decryptedText) {
-                    throw new Error("解密失败！提取码可能不正确。");
-                }
-                
+                if (!decryptedText) { throw new Error("解密失败！提取码可能不正确。"); }
                 const configs = JSON.parse(decryptedText);
 
-                const clashBlob = new Blob([configs.clash], { type: 'text/plain;charset=utf-8' });
+                async function stageLink(type, content) {
+                    const res = await fetch('/stage-link', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ type, content })
+                    });
+                    if (!res.ok) throw new Error(`生成临时${type}链接失败`);
+                    return (await res.json()).url;
+                }
+
+                clashResultLink.href = await stageLink('clash', configs.clash);
+                clashResultLink.textContent = "点击复制Clash订阅链接";
+
+                genericResultLink.href = await stageLink('generic', atob(configs.generic));
+                genericResultLink.textContent = "点击复制通用订阅链接";
+                
+                // For singbox, we create a direct download link
                 const singboxBlob = new Blob([configs.singbox], { type: 'application/json;charset=utf-8' });
-                const genericBlob = new Blob([atob(configs.generic)], { type: 'text/plain;charset=utf-8' });
-                
-                clashResultLink.href = URL.createObjectURL(clashBlob);
-                clashResultLink.textContent = "在浏览器中预览/复制 (Clash)";
-                
                 singboxResultLink.href = URL.createObjectURL(singboxBlob);
                 singboxResultLink.download = `singbox-config-${extractionCode.substring(0,8)}.json`;
-                
-                genericResultLink.href = URL.createObjectURL(genericBlob);
-                genericResultLink.textContent = "在浏览器中预览/复制 (通用)";
 
                 extractResultArea.classList.remove('hidden');
+
+                // Start countdown
+                let secondsLeft = 60;
+                countdownTimer.textContent = secondsLeft;
+                countdownInterval = setInterval(() => {
+                    secondsLeft--;
+                    countdownTimer.textContent = secondsLeft;
+                    if (secondsLeft <= 0) {
+                        clearInterval(countdownInterval);
+                        extractResultArea.classList.add('hidden');
+                        showError("临时链接已过期，请重新提取。");
+                    }
+                }, 1000);
+
             } else {
                  throw new Error(result.message || '提取失败。');
             }
@@ -224,7 +197,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // --- Helper Functions and other listeners ---
     document.body.addEventListener('click', (event) => {
         const target = event.target;
         if (target.classList.contains('copy-btn')) {
@@ -239,23 +211,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         target.textContent = originalText;
                         target.classList.remove('text-green-500');
                     }, 2000);
-                }).catch(err => {
-                    showError('复制失败: ' + err);
-                });
+                }).catch(err => {showError('复制失败: ' + err);});
             }
         }
     });
+
     function setLoading(btn, loader, btnText, isLoading) {
         btn.disabled = isLoading;
-        if (isLoading) {
-            btn.classList.add('cursor-not-allowed');
-            loader.classList.remove('hidden');
-            btnText.classList.add('hidden');
-        } else {
-            btn.classList.remove('cursor-not-allowed');
-            loader.classList.add('hidden');
-            btnText.classList.remove('hidden');
-        }
+        if (isLoading) { btn.classList.add('cursor-not-allowed'); loader.classList.remove('hidden'); btnText.classList.add('hidden');
+        } else { btn.classList.remove('cursor-not-allowed'); loader.classList.add('hidden'); btnText.classList.remove('hidden'); }
     }
     let errorTimeout;
     function showError(message) {
