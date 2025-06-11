@@ -1,12 +1,12 @@
 /**
  * =================================================================================
- * 欢迎来到 Cloudflare Workers! (远程订阅修复最终版)
+ * 欢迎来到 Cloudflare Workers! (KV临时链接最终版)
  * =================================================================================
  *
  * 【架构定型】:
- * 1. 【CORS支持】: 正确处理CORS预检请求(OPTIONS)，允许前端发送 `application/json` 类型的POST请求。
- * 2. 【纯粹的E2EE】: 此后端只负责存储和提取加密数据。所有明文处理逻辑和相关GET路由已被彻底移除。
- * 3. 【远程订阅修复】: 为 /proxy-fetch 接口的 fetch 请求添加了更完整的浏览器请求头，以绕过目标服务器的机器人检测。
+ * 1. 【引入KV】: 使用Cloudflare KV作为“阅后即焚”的临时存储，用于存放解密后的明文配置。
+ * 2. 【混合模式】: 长期数据在R2中端到端加密存储；临时生成的订阅链接通过KV提供，并设置极短TTL。
+ * 3. 【API增强】: 新增 /stage-link 接口用于创建临时链接，并新增 /live/... 路由用于提供临时链接的访问。
  */
 
 // =================================================================================
@@ -31,7 +31,7 @@ const corsHeaders = {
   }
   
   // =================================================================================
-  // 路由模块 (极简版)
+  // 路由模块
   // =================================================================================
   const Router = () => {
       const routes = [];
@@ -69,30 +69,16 @@ const corsHeaders = {
   router.post(/^\/convert$/, async ({ request, env }) => {
       try {
           const { extractionCode, encryptedData, expirationDays } = await request.json();
-  
           if (!extractionCode || !encryptedData) {
               return new Response('Missing extraction code or encrypted data.', { status: 400, headers: corsHeaders });
           }
-  
           const r2Key = `e2ee/${extractionCode}`;
-          
           const days = parseInt(expirationDays);
           let expiration;
-          if (days === 0) {
-              expiration = new Date(Date.now() + 5 * 60 * 1000); 
-          } else {
-              expiration = new Date(Date.now() + (days || 7) * 24 * 60 * 60 * 1000);
-          }
-  
-          await env.SUB_STORE.put(r2Key, encryptedData, {
-              httpMetadata: { contentType: 'application/octet-stream' }, 
-              expires: expiration,
-          });
-  
-          return new Response(JSON.stringify({ success: true }), {
-              headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          });
-  
+          if (days === 0) { expiration = new Date(Date.now() + 5 * 60 * 1000); } 
+          else { expiration = new Date(Date.now() + (days || 7) * 24 * 60 * 60 * 1000); }
+          await env.SUB_STORE.put(r2Key, encryptedData, { httpMetadata: { contentType: 'application/octet-stream' }, expires: expiration });
+          return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
       } catch (error) {
           console.error('Storage error:', error);
           return new Response(`Error storing data: ${error.message}`, { status: 500, headers: corsHeaders });
@@ -105,26 +91,12 @@ const corsHeaders = {
   router.post(/^\/extract$/, async ({ request, env }) => {
       try {
           const { extractionCode } = await request.json();
-          if (!extractionCode) {
-              return new Response('Extraction code is required.', { status: 400, headers: corsHeaders });
-          }
-          
+          if (!extractionCode) { return new Response('Extraction code is required.', { status: 400, headers: corsHeaders }); }
           const r2Key = `e2ee/${extractionCode}`;
           const object = await env.SUB_STORE.get(r2Key);
-  
-          if (object === null) {
-              return new Response('提取码无效或链接已过期。', { status: 404, headers: corsHeaders });
-          }
-          
+          if (object === null) { return new Response('提取码无效或链接已过期。', { status: 404, headers: corsHeaders }); }
           const encryptedDataString = await object.text();
-          
-          return new Response(JSON.stringify({ 
-              success: true, 
-              encryptedData: encryptedDataString,
-          }), {
-              headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          });
-  
+          return new Response(JSON.stringify({ success: true, encryptedData: encryptedDataString }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
       } catch (e) {
           console.error(`[BACKEND LOG] CRITICAL ERROR in /extract: ${e.message}`, e.stack);
           return new Response(`An error occurred during extraction: ${e.message}`, { status: 500, headers: corsHeaders });
@@ -132,7 +104,7 @@ const corsHeaders = {
   });
   
   // =================================================================================
-  // 【已修复】代理获取路由: /proxy-fetch - 用于安全地获取远程订阅
+  // 代理获取路由: /proxy-fetch
   // =================================================================================
   router.post(/^\/proxy-fetch$/, async ({ request }) => {
       try {
@@ -140,38 +112,61 @@ const corsHeaders = {
           if (!url || !url.startsWith('http')) {
               return new Response('A valid URL is required.', { status: 400, headers: corsHeaders });
           }
-  
-          // 【核心修复】: 构造一个更像真实浏览器的请求头
-          const browserHeaders = {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
-              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
-              'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
-              'Accept-Encoding': 'gzip, deflate, br',
-              'Connection': 'keep-alive',
-              'Upgrade-Insecure-Requests': '1',
-              'Sec-Fetch-Dest': 'document',
-              'Sec-Fetch-Mode': 'navigate',
-              'Sec-Fetch-Site': 'none',
-              'Sec-Fetch-User': '?1',
-          };
-  
+          const browserHeaders = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36','Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9','Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',};
           const response = await fetch(url, { headers: browserHeaders });
-  
           if (!response.ok) {
-              // 返回目标服务器的真实状态码和错误信息
               return new Response(`获取远程订阅失败 (状态: ${response.status})`, { status: response.status, headers: corsHeaders });
           }
-  
           const content = await response.text();
-  
-          return new Response(content, {
-              headers: { 'Content-Type': 'text/plain;charset=utf-8', ...corsHeaders }
-          });
-  
+          return new Response(content, { headers: { 'Content-Type': 'text/plain;charset=utf-8', ...corsHeaders } });
       } catch (e) {
           console.error('Proxy fetch error:', e);
           return new Response(`获取远程订阅时发生错误: ${e.message}`, { status: 500, headers: corsHeaders });
       }
+  });
+  
+  // =================================================================================
+  // 【新增】暂存路由: /stage-link (接收明文，存入KV，返回临时链接)
+  // =================================================================================
+  router.post(/^\/stage-link$/, async ({ request, env }) => {
+      try {
+          if (!env.TEMP_SUBS) {
+              throw new Error("KV namespace 'TEMP_SUBS' is not configured on this worker.");
+          }
+          const { type, content } = await request.json();
+          if (!type || !content) {
+              return new Response("Type and content are required.", { status: 400, headers: corsHeaders });
+          }
+          const tempId = crypto.randomUUID();
+          // 将明文存入KV，并设置60秒后自动过期
+          await env.TEMP_SUBS.put(tempId, content, { expirationTtl: 60 });
+          const urlBase = new URL(request.url).origin;
+          const liveUrl = `${urlBase}/live/${tempId}`;
+          return new Response(JSON.stringify({ success: true, url: liveUrl }), {
+              headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+      } catch (e) {
+          console.error('Staging error:', e);
+          return new Response(`Error staging link: ${e.message}`, { status: 500, headers: corsHeaders });
+      }
+  });
+  
+  
+  // =================================================================================
+  // 【新增】临时链接访问路由: /live/:id
+  // =================================================================================
+  router.get(/^\/live\/(?<id>.+)$/, async ({ params, env }) => {
+      const { id } = params;
+      if (!env.TEMP_SUBS) { return new Response("Temporary storage is not configured.", { status: 500 }); }
+      const content = await env.TEMP_SUBS.get(id, { type: "text" });
+      if (content === null) {
+          return new Response("Link expired or not found.", { status: 404 });
+      }
+      // 实现一次性链接：获取后立即删除 (可选)
+      // await env.TEMP_SUBS.delete(id);
+      return new Response(content, {
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+      });
   });
   
   
