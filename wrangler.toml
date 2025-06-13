@@ -16,5 +16,5 @@ bucket_name = "sub-store-bucket" # 请替换为您实际创建的R2存储桶名�
 
 [[kv_namespaces]]
 binding = "TEMP_SUBS"
-id = "8c7f09e2bd234dc3bfc0745fbde27e73"
-preview_id = "8c7f09e2bd234dc3bfc0745fbde27e73"
+id = "XXXXXXX"
+preview_id = "XXXXXX"
