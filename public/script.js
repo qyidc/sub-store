@@ -1,7 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
     // #################################################################################
-    //                          协议解析与配置生成模块 (完整版)
+    //                          协议解析与配置生成模块 (最终修复版)
     // #################################################################################
+    
     function b64UrlDecode(str) {try {str = str.replace(/-/g, '+').replace(/_/g, '/');while (str.length % 4) { str += '='; }return atob(str);} catch(e) {console.error("Base64URL Decode Failed for string:", str, e);return "";}}
     function parseShadowsocks(link) {try {if (!link.startsWith("ss://")) throw new Error("Not an SS link");const hashIndex = link.indexOf('#');const name = hashIndex > -1 ? decodeURIComponent(link.substring(hashIndex + 1)) : null;const corePart = hashIndex > -1 ? link.substring(5, hashIndex) : link.substring(5);if (corePart.indexOf('@') === -1) {const decoded = b64UrlDecode(corePart);if (!decoded) throw new Error("SIP002 core part is not valid Base64.");const atIndex = decoded.lastIndexOf('@');if (atIndex === -1) throw new Error("Invalid SIP002 format: missing '@' after decoding.");const authPart = decoded.substring(0, atIndex);const hostPart = decoded.substring(atIndex + 1);const [cipher, password] = authPart.split(':');const [server, port] = hostPart.split(':');if (server && port && cipher && password) {return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };}}else {const atIndex = corePart.lastIndexOf('@');const authPartB64 = corePart.substring(0, atIndex);const hostPart = corePart.substring(atIndex + 1);let cipher, password;const decodedAuth = atob(authPartB64);const colonIndex = decodedAuth.indexOf(':');if (colonIndex > 0) {cipher = decodedAuth.substring(0, colonIndex);password = decodedAuth.substring(colonIndex + 1);} else {throw new Error("Decoded auth part is invalid.");}const hostColonIndex = hostPart.lastIndexOf(':');if (hostColonIndex === -1) throw new Error("Invalid host part: missing port");const server = hostPart.substring(0, hostColonIndex);const port = hostPart.substring(hostColonIndex + 1);if (server && port && cipher && password) {return { name: name || `${server}:${port}`, type: 'ss', server, port: parseInt(port), cipher, password, udp: true };}}} catch (e) {throw new Error(`SS link parsing failed: ${e.message}`);}throw new Error("Could not parse SS link in any known format.");}
     function parseShadowsocksR(link) {try {const decoded = b64UrlDecode(link.substring('ssr://'.length));const mainParts = decoded.split('/?');const requiredParts = mainParts[0].split(':');if (requiredParts.length < 6) throw new Error("Invalid SSR main part");const [server, port, protocol, cipher, obfs, password_b64] = requiredParts;const paramsStr = mainParts.length > 1 ? mainParts[1] : '';const params = new URLSearchParams(paramsStr);const name = params.get('remarks') ? b64UrlDecode(params.get('remarks')) : `${server}:${port}`;const password = b64UrlDecode(password_b64);const obfsParam = params.get('obfsparam') ? b64UrlDecode(params.get('obfsparam')) : '';const protoParam = params.get('protoparam') ? b64UrlDecode(params.get('protoparam')) : '';return { name, type: 'ssr', server, port: parseInt(port, 10), cipher, password, protocol, 'protocol-param': protoParam, obfs, 'obfs-param': obfsParam, udp: true };} catch (e) {throw new Error(`SSR link parsing failed: ${e.message}`);}}
@@ -33,16 +34,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const messageArea = document.getElementById('message-area');
     const messageTitle = document.getElementById('message-title');
     const messageText = document.getElementById('message-text');
-    const countdownTimer = document.getElementById('countdown-timer');
-    const deleteBtn = document.getElementById('delete-btn');
-    const deleteBtnText = document.getElementById('delete-btn-text');
-    const deleteLoader = document.getElementById('delete-loader');
-    const confirmationModal = document.getElementById('confirmation-modal');
-    const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
-    const cancelDeleteBtn = document.getElementById('cancel-delete-btn');
-
-    let countdownInterval;
-    let codeToDelete = '';
 
     async function fetchRemoteSubscription(url) {
         setLoadingStatus("正在获取远程订阅...");
@@ -143,8 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setLoading(extractBtn, extractLoader, extractBtnText, true);
         hideMessage();
         extractResultArea.classList.add('hidden');
-        if (countdownInterval) clearInterval(countdownInterval);
-
+        
         try {
             const response = await fetch('/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ extractionCode }) });
             if (!response.ok) { throw new Error(await response.text() || `服务器错误: ${response.status}`); }
@@ -156,47 +146,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!decryptedText) { throw new Error("解密失败！提取码可能不正确。"); }
                 const configs = JSON.parse(decryptedText);
 
-                async function stageLink(type, content) {
-                    const res = await fetch('/stage-link', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, content }) });
-                    if (!res.ok) throw new Error(`生成临时${type}链接失败`);
-                    return (await res.json()).url;
-                }
-
-                // 【修复】: 使用 Promise.all 来并行生成临时链接，提升体验
-                const [clashUrl, genericUrl] = await Promise.all([
-                    stageLink('clash', configs.clash),
-                    stageLink('generic', atob(configs.generic))
-                ]);
-
-                clashResultLink.href = clashUrl;
-                clashResultLink.textContent = "点击复制Clash订阅链接";
-                genericResultLink.href = genericUrl;
-                genericResultLink.textContent = "点击复制通用订阅链接";
-                
+                const clashBlob = new Blob([configs.clash], { type: 'text/plain;charset=utf-8' });
                 const singboxBlob = new Blob([configs.singbox], { type: 'application/json;charset=utf-8' });
+                const genericBlob = new Blob([atob(configs.generic)], { type: 'text/plain;charset=utf-8' });
+                
+                clashResultLink.href = URL.createObjectURL(clashBlob);
+                clashResultLink.textContent = "点击预览/复制Clash链接";
+                
                 singboxResultLink.href = URL.createObjectURL(singboxBlob);
                 singboxResultLink.download = `singbox-config-${extractionCode.substring(0,8)}.json`;
+                
+                genericResultLink.href = URL.createObjectURL(genericBlob);
+                genericResultLink.textContent = "点击预览/复制通用链接";
 
                 extractResultArea.classList.remove('hidden');
-
-                // 生成二维码
-                document.getElementById('generic-qr-code').innerHTML = ''; // 清空旧的二维码
-                document.getElementById('clash-qr-code').innerHTML = '';
-                new QRCode(document.getElementById('generic-qr-code'), { text: genericUrl, width: 128, height: 128 });
-                new QRCode(document.getElementById('clash-qr-code'), { text: clashUrl, width: 128, height: 128 });
-
-                let secondsLeft = 60;
-                countdownTimer.textContent = secondsLeft;
-                countdownInterval = setInterval(() => {
-                    secondsLeft--;
-                    countdownTimer.textContent = secondsLeft;
-                    if (secondsLeft <= 0) {
-                        clearInterval(countdownInterval);
-                        extractResultArea.classList.add('hidden');
-                        showError("临时链接已过期，请重新提取。");
-                    }
-                }, 1000);
-
             } else {
                  throw new Error(result.message || '提取失败。');
             }
@@ -206,40 +169,8 @@ document.addEventListener('DOMContentLoaded', () => {
              setLoading(extractBtn, extractLoader, extractBtnText, false);
         }
     });
-    
-    deleteBtn.addEventListener('click', () => {
-        const code = extractCodeInput.value.trim();
-        if (!code) { return showError('请输入要删除的提取码。'); }
-        codeToDelete = code;
-        confirmationModal.classList.remove('hidden');
-    });
 
-    cancelDeleteBtn.addEventListener('click', () => {
-        confirmationModal.classList.add('hidden');
-        codeToDelete = '';
-    });
-
-    confirmDeleteBtn.addEventListener('click', async () => {
-        confirmationModal.classList.add('hidden');
-        setLoading(deleteBtn, deleteLoader, deleteBtnText, true);
-        hideMessage();
-
-        try {
-            const response = await fetch('/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ extractionCode: codeToDelete }) });
-            const resultText = await response.text(); 
-            const result = JSON.parse(resultText);
-            if (!response.ok) { throw new Error(result.message || resultText || `服务器错误: ${response.status}`); }
-            showSuccess(result.message || '删除成功！');
-            extractCodeInput.value = '';
-        } catch (error) {
-            showError(error.message);
-        } finally {
-            setLoading(deleteBtn, deleteLoader, deleteBtnText, false);
-            codeToDelete = '';
-        }
-    });
-
-    // --- 【升级】: 统一的事件委托，处理复制和二维码按钮
+    // --- Helper Functions and other listeners ---
     document.body.addEventListener('click', (event) => {
         const target = event.target;
         if (target.classList.contains('copy-btn')) {
@@ -256,21 +187,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     }, 2000);
                 }).catch(err => {showError('复制失败: ' + err);});
             }
-        } else if (target.classList.contains('qr-btn')) {
-            const qrContainer = document.querySelector(target.dataset.qrTarget);
-            if (qrContainer) {
-                qrContainer.classList.toggle('hidden');
-                target.textContent = qrContainer.classList.contains('hidden') ? '二维码' : '隐藏';
-            }
         }
     });
-
     function setLoading(btn, loader, btnText, isLoading) {
         btn.disabled = isLoading;
         if (isLoading) { btn.classList.add('cursor-not-allowed'); loader.classList.remove('hidden'); btnText.classList.add('hidden');
         } else { btn.classList.remove('cursor-not-allowed'); loader.classList.add('hidden'); btnText.classList.remove('hidden'); }
     }
-    
     let messageTimeout;
     function showMessage(message, isError = true) {
         clearTimeout(messageTimeout);
