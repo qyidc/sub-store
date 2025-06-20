@@ -34,7 +34,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const messageTitle = document.getElementById('message-title');
     const messageText = document.getElementById('message-text');
     const countdownTimer = document.getElementById('countdown-timer');
-    const deleteCodeInput = document.getElementById('delete-code-input');
     const deleteBtn = document.getElementById('delete-btn');
     const deleteBtnText = document.getElementById('delete-btn-text');
     const deleteLoader = document.getElementById('delete-loader');
@@ -195,11 +194,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
-    // 【新增】删除逻辑
     deleteBtn.addEventListener('click', () => {
         const code = extractCodeInput.value.trim();
         if (!code) { return showError('请输入要删除的提取码。'); }
-        codeToDelete = code; // 暂存要删除的码
+        codeToDelete = code;
         confirmationModal.classList.remove('hidden');
     });
 
@@ -218,7 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json(); 
             if (!response.ok) { throw new Error(result.message || result || `服务器错误: ${response.status}`); }
             showSuccess(result.message || '删除成功！');
-            extractCodeInput.value = ''; // 清空输入框
+            extractCodeInput.value = '';
         } catch (error) {
             showError(error.message);
         } finally {
@@ -227,8 +225,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-
-    // --- Helper Functions and other listeners ---
     document.body.addEventListener('click', (event) => {
         const target = event.target;
         if (target.classList.contains('copy-btn')) {
@@ -247,11 +243,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
+
     function setLoading(btn, loader, btnText, isLoading) {
         btn.disabled = isLoading;
         if (isLoading) { btn.classList.add('cursor-not-allowed'); loader.classList.remove('hidden'); btnText.classList.add('hidden');
         } else { btn.classList.remove('cursor-not-allowed'); loader.classList.add('hidden'); btnText.classList.remove('hidden'); }
     }
+    
     let messageTimeout;
     function showMessage(message, isError = true) {
         clearTimeout(messageTimeout);
@@ -264,8 +262,8 @@ document.addEventListener('DOMContentLoaded', () => {
         messageArea.classList.add('opacity-100');
         messageTimeout = setTimeout(() => {
             messageArea.classList.add('opacity-0');
-            setTimeout(() => messageArea.classList.add('hidden'), 300);
-        }, 8000); 
+            setTimeout(() => messageArea.classList.add('hidden'), 5000);
+        }, isError ? 8000 : 3000); // 错误信息显示更久
     }
     const showError = (message) => showMessage(message, true);
     const showSuccess = (message) => showMessage(message, false);
