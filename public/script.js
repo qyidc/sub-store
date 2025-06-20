@@ -162,15 +162,28 @@ document.addEventListener('DOMContentLoaded', () => {
                     return (await res.json()).url;
                 }
 
-                clashResultLink.href = await stageLink('clash', configs.clash);
+                // 【修复】: 使用 Promise.all 来并行生成临时链接，提升体验
+                const [clashUrl, genericUrl] = await Promise.all([
+                    stageLink('clash', configs.clash),
+                    stageLink('generic', atob(configs.generic))
+                ]);
+
+                clashResultLink.href = clashUrl;
                 clashResultLink.textContent = "点击复制Clash订阅链接";
-                genericResultLink.href = await stageLink('generic', atob(configs.generic));
+                genericResultLink.href = genericUrl;
                 genericResultLink.textContent = "点击复制通用订阅链接";
+                
                 const singboxBlob = new Blob([configs.singbox], { type: 'application/json;charset=utf-8' });
                 singboxResultLink.href = URL.createObjectURL(singboxBlob);
                 singboxResultLink.download = `singbox-config-${extractionCode.substring(0,8)}.json`;
 
                 extractResultArea.classList.remove('hidden');
+
+                // 生成二维码
+                document.getElementById('generic-qr-code').innerHTML = ''; // 清空旧的二维码
+                document.getElementById('clash-qr-code').innerHTML = '';
+                new QRCode(document.getElementById('generic-qr-code'), { text: genericUrl, width: 128, height: 128 });
+                new QRCode(document.getElementById('clash-qr-code'), { text: clashUrl, width: 128, height: 128 });
 
                 let secondsLeft = 60;
                 countdownTimer.textContent = secondsLeft;
@@ -213,8 +226,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const response = await fetch('/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ extractionCode: codeToDelete }) });
-            const result = await response.json(); 
-            if (!response.ok) { throw new Error(result.message || result || `服务器错误: ${response.status}`); }
+            const resultText = await response.text(); 
+            const result = JSON.parse(resultText);
+            if (!response.ok) { throw new Error(result.message || resultText || `服务器错误: ${response.status}`); }
             showSuccess(result.message || '删除成功！');
             extractCodeInput.value = '';
         } catch (error) {
@@ -225,6 +239,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // --- 【升级】: 统一的事件委托，处理复制和二维码按钮
     document.body.addEventListener('click', (event) => {
         const target = event.target;
         if (target.classList.contains('copy-btn')) {
@@ -240,6 +255,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         target.classList.remove('text-green-500');
                     }, 2000);
                 }).catch(err => {showError('复制失败: ' + err);});
+            }
+        } else if (target.classList.contains('qr-btn')) {
+            const qrContainer = document.querySelector(target.dataset.qrTarget);
+            if (qrContainer) {
+                qrContainer.classList.toggle('hidden');
+                target.textContent = qrContainer.classList.contains('hidden') ? '二维码' : '隐藏';
             }
         }
     });
@@ -263,7 +284,7 @@ document.addEventListener('DOMContentLoaded', () => {
         messageTimeout = setTimeout(() => {
             messageArea.classList.add('opacity-0');
             setTimeout(() => messageArea.classList.add('hidden'), 5000);
-        }, isError ? 8000 : 3000); // 错误信息显示更久
+        }, isError ? 8000 : 3000); 
     }
     const showError = (message) => showMessage(message, true);
     const showSuccess = (message) => showMessage(message, false);
