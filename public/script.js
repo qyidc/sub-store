@@ -93,7 +93,32 @@ document.addEventListener('DOMContentLoaded', () => {
     function parseShadowsocksR(link) {try {const decoded = b64UrlDecode(link.substring('ssr://'.length));const mainParts = decoded.split('/?');const requiredParts = mainParts[0].split(':');if (requiredParts.length < 6) throw new Error("Invalid SSR main part");const [server, port, protocol, cipher, obfs, password_b64] = requiredParts;const paramsStr = mainParts.length > 1 ? mainParts[1] : '';const params = new URLSearchParams(paramsStr);const name = params.get('remarks') ? b64UrlDecode(params.get('remarks')) : `${server}:${port}`;const password = b64UrlDecode(password_b64);const obfsParam = params.get('obfsparam') ? b64UrlDecode(params.get('obfsparam')) : '';const protoParam = params.get('protoparam') ? b64UrlDecode(params.get('protoparam')) : '';return { name, type: 'ssr', server, port: parseInt(port, 10), cipher, password, protocol, 'protocol-param': protoParam, obfs, 'obfs-param': obfsParam, udp: true };} catch (e) {throw new Error(`SSR link parsing failed: ${e.message}`);}}
     function parseShareLink(link) {if (!link) return []; let decodedLink = link; if (!link.includes('://') && (link.length % 4 === 0) && /^[a-zA-Z0-9+/]*={0,2}$/.test(link)) {try { decodedLink = atob(link); } catch (e) { /* ignore */ }} if (decodedLink.startsWith('ss://')) return [parseShadowsocks(decodedLink)]; if (decodedLink.startsWith('ssr://')) return [parseShadowsocksR(decodedLink)]; if (decodedLink.startsWith('vless://')) return [parseVless(decodedLink)]; if (decodedLink.startsWith('vmess://')) return [parseVmess(decodedLink)]; if (decodedLink.startsWith('trojan://')) return [parseTrojan(decodedLink)]; if (decodedLink.startsWith('tuic://')) return [parseTuic(decodedLink)]; if (decodedLink.startsWith('hysteria2://')) return [parseHysteria2(decodedLink)]; return [];}
     function parseVless(link) {try {const url = new URL(link);const params = url.searchParams;const proxy = {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'vless',server: url.hostname,port: parseInt(url.port, 10),uuid: url.username,network: params.get('type') || 'tcp',tls: params.get('security') === 'tls' || params.get('security') === 'reality',udp: true,flow: params.get('flow') || '','client-fingerprint': params.get('fp') || 'chrome',};if (proxy.tls) {proxy.servername = params.get('sni') || url.hostname;proxy.alpn = params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"];if (params.get('security') === 'reality') {proxy['reality-opts'] = { 'public-key': params.get('pbk'), 'short-id': params.get('sid') };}}if (proxy.network === 'ws') proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || url.hostname } };if (proxy.network === 'grpc') proxy['grpc-opts'] = { 'grpc-service-name': params.get('serviceName') || '' };return proxy;} catch(e) { throw new Error(`VLESS link parsing failed: ${e.message}`); } }
-    function parseVmess(link) {try {const jsonStr = atob(link.substring('vmess://'.length));const config = JSON.parse(jsonStr);return {name: config.ps || config.add, type: 'vmess', server: config.add, port: parseInt(config.port, 10),uuid: config.id, alterId: config.aid, cipher: config.scy || 'auto',tls: config.tls === 'tls', network: config.net || 'tcp', udp: true,servername: config.sni || undefined,'ws-opts': config.net === 'ws' ? { path: config.path || '/', headers: { Host: config.host || config.add } } : undefined,'h2-opts': config.net === 'h2' ? { path: config.path || '/', host: [config.host || config.add] } : undefined,'grpc-opts': config.net === 'grpc' ? { 'grpc-service-name': config.path || ''} : undefined,};} catch(e) { throw new Error(`VMess link parsing failed: ${e.message}`); } }
+    function parseVmess(link) {
+        try {
+            const jsonStr = atob(link.substring('vmess://'.length));
+            const config = JSON.parse(jsonStr);
+            return {
+                name: config.ps || config.add, 
+                type: 'vmess', 
+                server: config.add, 
+                port: parseInt(config.port, 10),
+                uuid: config.id, 
+                // 【核心修复】: 确保 alterId 始终存在。如果原始链接中没有 'aid'，则默认为 0。
+                // Clash内核要求vmess节点必须有alterId字段。
+                alterId: config.aid || 0, 
+                cipher: config.scy || 'auto',
+                tls: config.tls === 'tls', 
+                network: config.net || 'tcp', 
+                udp: true,
+                servername: config.sni || undefined,
+                'ws-opts': config.net === 'ws' ? { path: config.path || '/', headers: { Host: config.host || config.add } } : undefined,
+                'h2-opts': config.net === 'h2' ? { path: config.path || '/', host: [config.host || config.add] } : undefined,
+                'grpc-opts': config.net === 'grpc' ? { 'grpc-service-name': config.path || ''} : undefined,
+            };
+        } catch(e) { 
+            throw new Error(`VMess link parsing failed: ${e.message}`); 
+        } 
+    }
     function parseTrojan(link) {try {const url = new URL(link);const params = url.searchParams;return {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'trojan', server: url.hostname, port: parseInt(url.port, 10),password: url.username, udp: true, sni: params.get('sni') || url.hostname,servername: params.get('sni') || url.hostname,alpn: params.get('alpn') ? params.get('alpn').split(',') : ["h2", "http/1.1"],};} catch(e) { throw new Error(`Trojan link parsing failed: ${e.message}`); } }
     function parseTuic(link) {try {const url = new URL(link);const params = url.searchParams;const [uuid, password] = url.username.split(':');return {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'tuic', server: url.hostname, port: parseInt(url.port, 10),uuid: uuid, password: password,servername: params.get('sni') || url.hostname,udp: true,'congestion-controller': params.get('congestion_control') || 'bbr','udp-relay-mode': params.get('udp_relay_mode') || 'native',alpn: params.get('alpn') ? params.get('alpn').split(',') : ["h3"],'disable-sni': params.get('disable_sni') === 'true',};} catch(e) { throw new Error(`TUIC link parsing failed: ${e.message}`); } }
     function parseHysteria2(link) {try {const url = new URL(link);const params = url.searchParams;return {name: decodeURIComponent(url.hash).substring(1) || url.hostname,type: 'hysteria2', server: url.hostname, port: parseInt(url.port, 10),password: url.username,servername: params.get('sni') || url.hostname,udp: true,'skip-cert-verify': params.get('insecure') === '1' || params.get('skip_cert_verify') === 'true',obfs: params.get('obfs'),'obfs-password': params.get('obfs-password'),};} catch(e) { throw new Error(`Hysteria2 link parsing failed: ${e.message}`); } }
